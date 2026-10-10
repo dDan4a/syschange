@@ -52,6 +52,9 @@ ID is a file path inside ~/.config (hypr/bindings.conf), an app directory (hypr)
 a package or unit name, or a group: packages, services. No ID means all changes.
 `
 
+// newStore is swapped out in tests, so the CLI runs against a sandbox.
+var newStore = DefaultStore
+
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "syschange:", err)
@@ -68,7 +71,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		fmt.Fprintln(stdout, version)
 		return nil
 	}
-	s, err := DefaultStore()
+	s, err := newStore()
 	if err != nil {
 		return err
 	}

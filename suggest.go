@@ -105,7 +105,7 @@ func runAgent(ctx context.Context, agent, prompt string) (string, error) {
 	default:
 		return "", fmt.Errorf("describing with %q is not supported; use claude, codex, gemini, grok or opencode (syschange suggest --agent NAME)", agent)
 	}
-	if _, err := exec.LookPath(args[0]); err != nil {
+	if path, err := exec.LookPath(args[0]); err != nil || lazyInstaller(path) {
 		return "", fmt.Errorf("%s is not installed", args[0])
 	}
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
@@ -125,6 +125,20 @@ func runAgent(ctx context.Context, agent, prompt string) (string, error) {
 		return readFileString(outFile)
 	}
 	return string(out), nil
+}
+
+// lazyInstaller spots Omarchy's stubs in ~/.local/bin that install an agent
+// through mise the first time they run. Running one would install software
+// the user never asked for.
+func lazyInstaller(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 1024)
+	n, _ := f.Read(head)
+	return bytes.HasPrefix(head[:n], []byte("#!")) && bytes.Contains(head[:n], []byte("mise use -g"))
 }
 
 func readFileString(path string) (string, error) {

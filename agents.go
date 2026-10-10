@@ -226,7 +226,7 @@ func (g *Agents) Remove() error {
 }
 
 // hookMarker finds our hook in a file whatever path the binary had.
-const hookMarker = `syschange'? hook (claude|codex|gemini|grok)( start| pre| post)?( \|\| true)?$`
+const hookMarker = `syschange[^ /]*'? hook (claude|codex|gemini|grok)( start| pre| post)?( \|\| true)?$`
 
 func hasHook(file, event string) (bool, error) {
 	if _, err := os.Stat(file); err != nil {

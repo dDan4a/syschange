@@ -35,8 +35,8 @@ func (s *Store) callFile(agent string, in toolInput) string {
 // some agents read a PostToolUse hook's output as feedback.
 func (s *Store) ToolHook(agent string, start bool, stdin io.Reader) error {
 	var in toolInput
-	if err := json.NewDecoder(stdin).Decode(&in); err != nil || in.session() == "" || !s.Initialized() || suggesting() {
-		return err
+	if json.NewDecoder(stdin).Decode(&in) != nil || in.session() == "" || !s.Initialized() || suggesting() {
+		return nil // fail open: bad input never breaks the agent
 	}
 	if err := os.MkdirAll(s.path("sessions"), 0o700); err != nil {
 		return err

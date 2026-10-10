@@ -38,8 +38,9 @@ func firstNonEmpty(a, b string) string {
 // can tell the agent's changes from the user's.
 func (s *Store) SessionStartHook(agent string, stdin io.Reader) error {
 	var in hookInput
-	if err := json.NewDecoder(stdin).Decode(&in); err != nil || in.session() == "" || !s.Initialized() || suggesting() {
-		return err
+	// Hooks fail open: bad input never breaks the agent.
+	if json.NewDecoder(stdin).Decode(&in) != nil || in.session() == "" || !s.Initialized() || suggesting() {
+		return nil
 	}
 	dir := s.path("sessions")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -78,8 +79,8 @@ func pruneSessions(dir string) {
 // them with a one-line reason.
 func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error {
 	var in hookInput
-	if err := json.NewDecoder(stdin).Decode(&in); err != nil {
-		return err
+	if json.NewDecoder(stdin).Decode(&in) != nil {
+		return nil // fail open
 	}
 	// Asked once already: never trap the agent in a loop.
 	if in.StopActive || in.StopActiveCaml || !s.Initialized() || suggesting() {

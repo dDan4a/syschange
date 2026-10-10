@@ -1,6 +1,10 @@
 # syschange
 
+[![test](https://github.com/dDan4a/syschange/actions/workflows/test.yml/badge.svg)](https://github.com/dDan4a/syschange/actions/workflows/test.yml)
+
 A history of changes to your Linux setup, with a reason for each one and undo.
+
+![The System Changes panel in the Omarchy bar](preview.png)
 
 You tweak a keybinding, install a package, enable a service. A week later something is off and you
 don't remember what you touched, or your AI agent changed it while fixing something else.

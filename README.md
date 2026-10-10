@@ -24,6 +24,8 @@ diff and undo it.
   Gemini CLI and Grok a skill and hooks; an agent that changed your system records why before it finishes.
 - **Backup to your own git repository**: `syschange remote set git@github.com:you/setup.git` and every change
   is pushed in the background. Dotfiles on autopilot, with a reason for each change.
+- **New machine in one command**: `syschange apply git@github.com:you/setup.git` shows what it will do, then
+  writes the config files, installs the packages (AUR too) and enables the services you added on the old one.
 - **Markdown export**: the history with every change, what is not recorded yet, and the commands to repeat
   your setup on a new machine. One click in the panel, or keep a file (in Obsidian, your dotfiles…) updated
   after every change with `syschange export --auto FILE`.
@@ -83,6 +85,7 @@ Recorded 2 change(s).
 | `syschange restore NAME` | bring config files back to a checkpoint; prints the `sudo` commands for packages and services |
 | `syschange remote [set URL\|off]` | back the history up to a private git repository |
 | `syschange push` | push now; it also happens by itself after every change |
+| `syschange apply [--yes] BACKUP` | bring a backed-up setup to this machine |
 | `syschange export [--to FILE]` | Markdown: history and setup steps |
 | `syschange export --auto FILE\|off` | keep FILE updated after every record |
 | `syschange agents [install\|remove]` | connect Claude Code and Codex |
@@ -147,6 +150,20 @@ gets the branch `config` (the history of `~/.config`), the branch `state` (the j
 lists, AUR packages, checkpoints) and the checkpoint refs. After every recorded change and every checkpoint,
 a background push sends them; it never asks for a password, so use SSH keys or a credential helper. The cloud
 icon in the panel shows the last push and turns red when it fails.
+
+### On a new machine
+
+```bash
+syschange apply git@github.com:you/setup.git
+```
+
+`apply` reads the backup and compares it with this machine. It takes what you changed on top of the old
+system since tracking started there: config files (added, changed, deleted), packages you installed (from the
+repositories and the AUR) and services you enabled. It prints the plan and asks; nothing happens without a yes
+(or `--yes`). Then it saves a checkpoint of the current state, writes the files, runs `sudo pacman -S --needed`,
+`yay -S --needed` and `systemctl enable --now` in your terminal, and records everything as one entry. The config
+part can be undone with `syschange restore "Before applying …"`. Packages removed on the old machine are listed,
+never removed here. Running `apply` again only does what is still missing.
 
 **Keep that repository private.** Files that look like secrets never enter the history, but the rest of your
 config does.

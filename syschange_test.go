@@ -647,3 +647,85 @@ func TestBackupRemote(t *testing.T) {
 		t.Fatal("push to a missing remote must fail and be noted")
 	}
 }
+
+func TestApplyFromBackup(t *testing.T) {
+	// Machine A: changes, then a backup.
+	a, aPkgs := newTestStore(t)
+	aUnits := []string{"system sshd.service"}
+	a.ListUnits = func() ([]string, error) { return slices.Clone(aUnits), nil }
+	a.ListForeign = func() ([]string, error) { return []string{"yay-bin"}, nil }
+	write(t, a.ConfigDir, "hypr/bindings.conf", "bind = SUPER, R, exec, voxtype\n")
+	write(t, a.ConfigDir, "voxtype/config.toml", "model = \"base\"\n")
+	os.Remove(filepath.Join(a.ConfigDir, "git/config"))
+	*aPkgs = append(*aPkgs, "voxtype", "yay-bin")
+	aUnits = append(aUnits, "user voxtype.service")
+	if _, err := a.Record(nil, "Voice typing", ""); err != nil {
+		t.Fatal(err)
+	}
+	remote := filepath.Join(t.TempDir(), "backup.git")
+	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
+	if err := a.SetRemote(remote); err != nil {
+		t.Fatal(err)
+	}
+
+	// Machine B: fresh, already has yay-bin.
+	b, bPkgs := newTestStore(t)
+	*bPkgs = append(*bPkgs, "yay-bin")
+	b.Record([]string{"packages"}, "", "")
+	plan, err := b.PlanApply(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plan.Cleanup()
+	var files []string
+	for _, f := range plan.Files {
+		files = append(files, f.Action+" "+f.Path)
+	}
+	slices.Sort(files)
+	if !slices.Equal(files, []string{"add voxtype/config.toml", "delete git/config", "overwrite hypr/bindings.conf"}) ||
+		!slices.Equal(plan.Repo, []string{"voxtype"}) || len(plan.AUR) != 0 || !slices.Equal(plan.Units, []string{"user voxtype.service"}) {
+		t.Fatalf("plan files=%v repo=%v aur=%v units=%v", files, plan.Repo, plan.AUR, plan.Units)
+	}
+
+	var ran []string
+	run := func(args ...string) error {
+		ran = append(ran, strings.Join(args, " "))
+		if args[1] == "pacman" {
+			*bPkgs = append(*bPkgs, "voxtype")
+		}
+		return nil
+	}
+	if err := b.Apply(plan, run, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(ran, []string{"sudo pacman -S --needed voxtype", "systemctl --user enable --now voxtype.service"}) {
+		t.Fatalf("ran %v", ran)
+	}
+	if got, _ := os.ReadFile(filepath.Join(b.ConfigDir, "hypr/bindings.conf")); string(got) != "bind = SUPER, R, exec, voxtype\n" {
+		t.Fatalf("bindings %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(b.ConfigDir, "git/config")); err == nil {
+		t.Fatal("git/config should be deleted")
+	}
+	history, _ := b.History()
+	if history[0].Note != "Applied setup from "+remote {
+		t.Fatalf("history %+v", history[0])
+	}
+	if cps, _ := b.Checkpoints(); len(cps) != 1 || !strings.HasPrefix(cps[0].Name, "Before applying") {
+		t.Fatalf("checkpoints %+v", cps)
+	}
+	// Files and the package are recorded in one entry.
+	if p, _ := b.Pending(); len(p) != 0 {
+		t.Fatalf("pending after apply: %v", ids(p))
+	}
+
+	// Applying again: nothing left to do.
+	again, err := b.PlanApply(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Cleanup()
+	if len(again.Files) != 0 || len(again.Repo) != 0 {
+		t.Fatalf("second plan not empty: %+v", again)
+	}
+}

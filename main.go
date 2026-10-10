@@ -40,6 +40,7 @@ Usage:
   syschange undo ENTRY                 undo a recorded entry (its commit, or time from status --json)
   syschange remote [set URL | off]     back the history up to a private git repository
   syschange push                       push now (it happens by itself after every change)
+  syschange apply [--yes] BACKUP       bring a backed-up setup to this machine: files, packages, services
   syschange export [--to FILE]         history and setup steps as Markdown
   syschange export --auto FILE|off     keep FILE updated after every record
   syschange agents [install [NAME...]|remove]
@@ -75,6 +76,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	color := fs.Bool("color", false, "colored diff even when not writing to a terminal")
+	yes := fs.Bool("yes", false, "apply: do it without asking")
 	quiet := fs.Bool("quiet", false, "push: print nothing")
 	exportTo := fs.String("to", "", "export: write to this file instead of stdout")
 	autoExport := fs.String("auto", "", "export: keep this file updated after every record; off to stop")
@@ -161,6 +163,35 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return s.Ignore(args[0])
 	case "log":
 		return printLog(s, stdout)
+	case "apply":
+		if len(args) != 1 {
+			return errors.New("usage: syschange apply [--yes] URL-or-path-of-a-backup")
+		}
+		plan, err := s.PlanApply(args[0])
+		if err != nil {
+			return err
+		}
+		defer plan.Cleanup()
+		plan.Print(stdout)
+		if plan.Empty() {
+			return nil
+		}
+		if !*yes {
+			if !isTerminal(stdout) {
+				return errors.New("run with --yes to apply")
+			}
+			fmt.Fprint(stdout, "\nApply? A checkpoint of the current state is saved first. [y/N] ")
+			var answer string
+			fmt.Fscanln(stdin, &answer)
+			if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+				return errors.New("cancelled")
+			}
+		}
+		if err := s.Apply(plan, runAttached, *by); err != nil {
+			return err
+		}
+		fmt.Fprintln(stdout, "Applied. Undo the config part with: syschange restore \"Before applying "+args[0]+"\"")
+		return nil
 	case "remote":
 		switch {
 		case len(args) == 2 && args[0] == "set":

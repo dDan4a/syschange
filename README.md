@@ -32,19 +32,25 @@ token or key are never copied into the history.
 
 ## Install
 
-```bash
-go install github.com/dDan4a/syschange@latest      # or: go build -o ~/.local/bin/syschange .
-syschange init
-```
-
-The Omarchy bar widget:
+On Omarchy, add the bar widget and press **Install syschange** in its panel:
 
 ```bash
 omarchy plugin add https://github.com/dDan4a/syschange.git --enable --yes
 ```
 
-If `syschange` is not on the shell's `PATH` (for example it lives in `~/go/bin`), set the full path in
-the widget settings.
+The button opens a terminal, builds the CLI version the widget is written for into `~/.local/bin` and runs
+`syschange init`. It uses your Go if you have one; otherwise mise (part of Omarchy) fetches Go just for this
+build, without installing it globally. When the widget is updated and needs a newer CLI, the same button
+offers the update.
+
+By hand, anywhere:
+
+```bash
+GOBIN=~/.local/bin go install github.com/dDan4a/syschange@latest
+syschange init
+```
+
+If `syschange` is somewhere off the shell's `PATH`, set the full path in the widget settings.
 
 ## Use
 

@@ -424,3 +424,28 @@ func TestUndoSymlink(t *testing.T) {
 		t.Fatal("symlink not restored")
 	}
 }
+
+func TestSuggest(t *testing.T) {
+	s, _ := newTestStore(t)
+	bin := t.TempDir()
+	// A fake agent: prints chatter, then the answer, and records the prompt it got.
+	script := "#!/bin/sh\nfor a; do last=$a; done\nprintf '%s' \"$last\" > " + filepath.Join(bin, "prompt") + "\necho 'Thinking...'\necho '\"Голосовой ввод по Super+R.\"'\n"
+	os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755)
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	t.Setenv("LANG", "ru_RU.UTF-8")
+
+	write(t, s.ConfigDir, "hypr/bindings.conf", "bind = SUPER, R, exec, voxtype\n")
+	line, err := s.Suggest([]string{"hypr"}, "claude")
+	if err != nil || line != "Голосовой ввод по Super+R" {
+		t.Fatalf("suggest = %q, %v", line, err)
+	}
+	prompt, _ := os.ReadFile(filepath.Join(bin, "prompt"))
+	for _, want := range []string{"ru_RU.UTF-8", "Hyprland", "+bind = SUPER, R, exec, voxtype"} {
+		if !strings.Contains(string(prompt), want) {
+			t.Errorf("prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	if _, err := s.Suggest(nil, "pi"); err == nil {
+		t.Fatal("unsupported agent must fail")
+	}
+}

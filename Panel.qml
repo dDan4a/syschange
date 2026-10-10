@@ -34,10 +34,29 @@ Panel {
 
   function current() { return groups.length > 0 ? groups[Math.min(selected, groups.length - 1)] : null }
 
-  function describe(group) {
+  function describe(group, text) {
     if (!group) return
     editingKey = group.key
-    Qt.callLater(function() { noteField.text = ""; noteField.forceActiveFocus() })
+    Qt.callLater(function() { noteField.text = text || ""; noteField.forceActiveFocus(); noteField.selectAll() })
+  }
+
+  // Only the panel that asked (one per monitor) shows the answer, and it
+  // reopens if it was closed while the agent was thinking.
+  property string askedKey: ""
+  function suggest(group) {
+    if (!group || !root.source) return
+    askedKey = group.key
+    root.source.suggest(group.key)
+  }
+  Connections {
+    target: root.source
+    function onSuggested(key, text) {
+      if (key !== root.askedKey) return
+      root.askedKey = ""
+      if (!root.opened) root.open()
+      for (var i = 0; i < root.groups.length; i++)
+        if (root.groups[i].key === key) { root.selected = i; root.describe(root.groups[i], text); return }
+    }
   }
   function cancelDescribe() {
     editingKey = ""
@@ -109,6 +128,7 @@ Panel {
         else if (key === "d") root.describe(g)
         else if (key === "s") root.source.skip(g.key)
         else if (key === "v") root.source.openDiff(g.key)
+        else if (key === "a") root.suggest(g)
       }
 
       Column {
@@ -225,6 +245,14 @@ Panel {
                     tooltipText: "Describe why (Enter)"
                     foreground: root.foreground
                     onClicked: { root.selected = groupItem.index; root.describe(groupItem.modelData) }
+                  }
+                  PanelActionButton {
+                    readonly property bool working: root.source !== null && root.source.suggestingKey === groupItem.modelData.key
+                    iconText: working ? "󰔟" : "󰁨" // nf-md-timer_sand / nf-md-auto_fix
+                    tooltipText: working ? "Asking your AI agent…" : "Describe with AI (a): your default agent reads the diff"
+                    foreground: working ? Color.accent : root.foreground
+                    enabled: root.source !== null && root.source.suggestingKey === ""
+                    onClicked: root.suggest(groupItem.modelData)
                   }
                   PanelActionButton {
                     iconText: "󰄬" // nf-md-check
@@ -435,7 +463,7 @@ Panel {
 
         Text {
           width: parent.width
-          text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · s keep · v diff · r refresh"
+          text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · s keep · v diff · r refresh"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

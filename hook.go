@@ -37,7 +37,7 @@ func firstNonEmpty(a, b string) string {
 // can tell the agent's changes from the user's.
 func (s *Store) SessionStartHook(agent string, stdin io.Reader) error {
 	var in hookInput
-	if err := json.NewDecoder(stdin).Decode(&in); err != nil || in.session() == "" || !s.Initialized() {
+	if err := json.NewDecoder(stdin).Decode(&in); err != nil || in.session() == "" || !s.Initialized() || suggesting() {
 		return err
 	}
 	dir := s.path("sessions")
@@ -81,7 +81,7 @@ func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error 
 		return err
 	}
 	// Asked once already: never trap the agent in a loop.
-	if in.StopActive || in.StopActiveCaml || !s.Initialized() {
+	if in.StopActive || in.StopActiveCaml || !s.Initialized() || suggesting() {
 		return nil
 	}
 	started, ok := s.sessionStarted(agent, in)
@@ -114,6 +114,10 @@ func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error 
 	}
 	return json.NewEncoder(stdout).Encode(map[string]string{"decision": decision, "reason": b.String()})
 }
+
+// suggesting is true inside the agent that syschange suggest runs: its own
+// hooks have nothing to report.
+func suggesting() bool { return os.Getenv("SYSCHANGE_SUGGEST") == "1" }
 
 // sessionStarted prefers the time recorded by the SessionStart hook and falls
 // back to the first timestamp in the transcript.

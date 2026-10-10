@@ -18,6 +18,10 @@ Item {
   readonly property bool agentsConnected: agents.length > 0 && agents.every(function(a) { return a.connected })
   property string error: ""
   property bool busy: actionProcess.running
+  property string suggestingKey: ""  // group an AI description is being written for
+
+  // A ready AI description for a group; the panel opens it for editing.
+  signal suggested(string key, string text)
 
   function refresh() {
     if (statusProcess.running) return
@@ -38,6 +42,13 @@ Item {
   function revert(id) { act(["revert", id]) }
   function ignore(path) { act(["ignore", path]) }
   function undo(entryTime) { act(["undo", entryTime]) }
+
+  function suggest(key) {
+    if (suggestProcess.running) return
+    suggestingKey = key
+    suggestProcess.command = [binary, "suggest", key]
+    suggestProcess.running = true
+  }
 
   function openDiff(key) {
     Quickshell.execDetached(["setsid", "uwsm-app", "--", "xdg-terminal-exec", "--app-id=org.omarchy.terminal",
@@ -82,6 +93,19 @@ Item {
       } catch (e) {
         root.failure("unexpected output from syschange status")
       }
+    }
+  }
+
+  Process {
+    id: suggestProcess
+    stdout: StdioCollector { id: suggestOut; waitForEnd: true }
+    stderr: StdioCollector { id: suggestErr; waitForEnd: true }
+    onExited: function(exitCode) {
+      var key = root.suggestingKey
+      root.suggestingKey = ""
+      if (exitCode !== 0) { root.failure(suggestErr.text || suggestOut.text); return }
+      root.error = ""
+      root.suggested(key, String(suggestOut.text || "").trim())
     }
   }
 

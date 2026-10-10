@@ -25,6 +25,8 @@ Usage:
   syschange note [--by NAME] TEXT [ID...]
                                        record changes with a one-line reason
   syschange skip [ID...]               record changes without a reason
+  syschange suggest [--agent NAME] [ID...]
+                                       ask an AI agent for a one-line description
   syschange diff [--color] [ID...]     show what changed in config files
   syschange revert ID...               undo config changes
   syschange ignore PATH                never track PATH (a gitignore pattern)
@@ -58,6 +60,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	color := fs.Bool("color", false, "colored diff even when not writing to a terminal")
+	agentName := fs.String("agent", "", "agent for suggest; default: Omarchy's default agent")
 	by := fs.String("by", defaultAuthor(), "who made the change, for example an agent name")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -89,6 +92,13 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 		fmt.Fprintf(stdout, "Recorded %d change(s) without a description.\n", len(e.Changes))
+		return nil
+	case "suggest":
+		line, err := s.Suggest(args, *agentName)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(stdout, line)
 		return nil
 	case "diff":
 		return s.Diff(stdout, args, *color || isTerminal(stdout))

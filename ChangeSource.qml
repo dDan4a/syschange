@@ -17,6 +17,8 @@ Item {
   property var agents: []       // installed coding agents: {name, connected}
   readonly property bool agentsConnected: agents.length > 0 && agents.every(function(a) { return a.connected })
   property string error: ""
+  property string notice: ""        // commands to run as root after an undo or restore
+  property var checkpoints: []
   property bool busy: actionProcess.running
   property string suggestingKey: ""  // group an AI description is being written for
 
@@ -31,6 +33,7 @@ Item {
 
   function act(args) {
     if (actionProcess.running) return
+    notice = ""
     actionProcess.command = [binary].concat(args)
     actionProcess.running = true
   }
@@ -42,6 +45,8 @@ Item {
   function revert(id) { act(["revert", id]) }
   function ignore(path) { act(["ignore", path]) }
   function undo(entryTime) { act(["undo", entryTime]) }
+  function checkpoint(name) { act(["checkpoint", name]) }
+  function restore(commit) { act(["restore", commit]) }
 
   function suggest(key) {
     if (suggestProcess.running) return
@@ -89,6 +94,7 @@ Item {
         root.history = s.history || []
         root.count = s.count || 0
         root.agents = s.agents || []
+        root.checkpoints = s.checkpoints || []
         root.error = ""
       } catch (e) {
         root.failure("unexpected output from syschange status")
@@ -116,7 +122,11 @@ Item {
     onExited: function(exitCode) {
       // Reverting a package prints the command to run as root: show it.
       if (exitCode !== 0) root.failure(actionErr.text || actionOut.text)
-      else root.error = ""
+      else {
+        root.error = ""
+        var out = String(actionOut.text || "").trim()
+        if (/sudo |systemctl /.test(out)) root.notice = out
+      }
       root.refresh()
     }
   }

@@ -31,6 +31,9 @@ Usage:
   syschange revert ID...               undo config changes
   syschange ignore PATH                never track PATH (a gitignore pattern)
   syschange log                        show the history
+  syschange checkpoint [NAME]          save the whole setup now, unrecorded edits included
+  syschange checkpoints                list them
+  syschange restore NAME               bring config files back to a checkpoint
   syschange undo ENTRY                 undo a recorded entry (its commit, or time from status --json)
   syschange export                     history and setup steps as Markdown
   syschange agents [install|remove]     connect Claude Code, Codex, Gemini CLI, Grok: skill + hooks
@@ -92,6 +95,35 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 		fmt.Fprintf(stdout, "Recorded %d change(s) without a description.\n", len(e.Changes))
+		return nil
+	case "checkpoint":
+		cp, err := s.Checkpoint(strings.Join(args, " "))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "Saved checkpoint %q.\n", cp.Name)
+		return nil
+	case "checkpoints":
+		all, err := s.Checkpoints()
+		if err != nil {
+			return err
+		}
+		for _, cp := range all {
+			fmt.Fprintf(stdout, "%s  %s\n", cp.Time.Format("2006-01-02 15:04"), cp.Name)
+		}
+		return nil
+	case "restore":
+		if len(args) == 0 {
+			return errors.New("restore takes a checkpoint name, see syschange checkpoints")
+		}
+		hint, err := s.Restore(strings.Join(args, " "), *by)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(stdout, "Config files restored. The state before is saved as a checkpoint too.")
+		if hint != "" {
+			fmt.Fprintln(stdout, hint)
+		}
 		return nil
 	case "suggest":
 		line, err := s.Suggest(args, *agentName)
@@ -177,10 +209,11 @@ type statusJSON struct {
 	History     []Entry      `json:"history"`
 	ConfigDir   string       `json:"configDir"`
 	Agents      []AgentState `json:"agents"`
+	Checkpoints []Checkpoint `json:"checkpoints"`
 }
 
 func status(s *Store, w io.Writer, asJSON bool) error {
-	out := statusJSON{Initialized: s.Initialized(), ConfigDir: s.ConfigDir, Pending: []Group{}, History: []Entry{}, Agents: []AgentState{}}
+	out := statusJSON{Initialized: s.Initialized(), ConfigDir: s.ConfigDir, Pending: []Group{}, History: []Entry{}, Agents: []AgentState{}, Checkpoints: []Checkpoint{}}
 	if g, err := DefaultAgents(); err == nil {
 		if states, err := g.Status(); err == nil {
 			out.Agents = append(out.Agents, states...)
@@ -199,6 +232,14 @@ func status(s *Store, w io.Writer, asJSON bool) error {
 			return err
 		}
 		out.History = history[:min(len(history), 50)]
+		checkpoints, err := s.Checkpoints()
+		if err != nil {
+			return err
+		}
+		for _, cp := range checkpoints[:min(len(checkpoints), 10)] {
+			cp.Packages, cp.Units = nil, nil // the panel needs names, not lists
+			out.Checkpoints = append(out.Checkpoints, cp)
+		}
 	}
 	if asJSON {
 		return json.NewEncoder(w).Encode(out)

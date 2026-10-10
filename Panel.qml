@@ -64,8 +64,13 @@ Panel {
   }
   function commitDescribe() {
     var text = noteField.text.trim()
-    if (text !== "" && source) source.note(editingKey, text)
+    if (source && editingKey === "@checkpoint") source.checkpoint(text)
+    else if (text !== "" && source) source.note(editingKey, text)
     cancelDescribe()
+  }
+  function newCheckpoint() {
+    editingKey = "@checkpoint"
+    Qt.callLater(function() { noteField.text = ""; noteField.forceActiveFocus() })
   }
 
   // Destructive actions take two clicks: the first arms, the second runs.
@@ -76,6 +81,7 @@ Panel {
   }
   function revert(change) { confirm("revert:" + change.id, function() { root.source.revert(change.id) }) }
   function ignoreGroup(group) { confirm("ignore:" + group.key, function() { root.source.ignore(group.key + "/") }) }
+  function restoreCheckpoint(cp) { confirm("restore:" + cp.commit, function() { root.source.restore(cp.commit) }) }
   function undoEntry(entry) { confirm("undo:" + entry.time, function() { root.source.undo(entry.time) }) }
 
   // Who wrote the entry, or else which agents made its changes.
@@ -134,6 +140,7 @@ Panel {
       onTextKey: function(text) {
         var key = text.toLowerCase(), g = root.current()
         if (key === "r") root.source.refresh()
+        else if (key === "c") root.newCheckpoint()
         else if (!g) return
         else if (key === "d") root.describe(g)
         else if (key === "s") root.source.skip(g.key)
@@ -167,6 +174,17 @@ Panel {
           width: parent.width
           text: root.source ? root.source.error : ""
           color: Color.urgent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.Wrap
+          textFormat: Text.PlainText
+        }
+
+        Text {
+          visible: text !== ""
+          width: parent.width
+          text: root.source ? root.source.notice : ""
+          color: Color.accent
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           wrapMode: Text.Wrap
@@ -351,7 +369,7 @@ Panel {
           TextField {
             id: noteField
             width: parent.width
-            placeholderText: "Why? For example: voice typing on Super+R"
+            placeholderText: root.editingKey === "@checkpoint" ? "Checkpoint name, for example: before new animations (empty: date)" : "Why? For example: voice typing on Super+R"
             foreground: root.foreground
             font.family: root.fontFamily
             Keys.onPressed: function(event) {
@@ -439,6 +457,74 @@ Panel {
           }
         }
 
+        PanelSeparator { width: parent.width; visible: root.source !== null && root.source.initialized }
+
+        Item {
+          visible: root.source !== null && root.source.initialized
+          width: parent.width
+          height: Math.max(cpHeader.implicitHeight, cpAdd.implicitHeight)
+          PanelSectionHeader {
+            id: cpHeader
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Checkpoints"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+          PanelActionButton {
+            id: cpAdd
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "󰆓" // nf-md-content_save
+            tooltipText: "Save a checkpoint of the whole setup (c)"
+            foreground: root.foreground
+            onClicked: root.newCheckpoint()
+          }
+        }
+
+        Text {
+          visible: root.source !== null && root.source.initialized && root.source.checkpoints.length === 0
+          width: parent.width
+          text: "Save one before an experiment, and get back to it in one click."
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.Wrap
+        }
+
+        Repeater {
+          model: root.source ? root.source.checkpoints.slice(0, 5) : []
+          delegate: Item {
+            id: cpItem
+            required property var modelData
+            readonly property bool armed: root.armed === "restore:" + modelData.commit
+            width: contentColumn.width
+            height: Math.max(cpText.implicitHeight, cpRestore.implicitHeight)
+            Text {
+              id: cpText
+              anchors.left: parent.left
+              anchors.right: cpRestore.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: cpItem.armed ? "Click again to restore config files to “" + cpItem.modelData.name + "”"
+                : cpItem.modelData.name + "  ·  " + root.ago(cpItem.modelData.time)
+              color: cpItem.armed ? Color.urgent : root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              elide: Text.ElideRight
+              textFormat: Text.PlainText
+            }
+            PanelActionButton {
+              id: cpRestore
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󰦛" // nf-md-restore
+              tooltipText: "Restore. The current state is saved as a checkpoint first"
+              foreground: cpItem.armed ? Color.urgent : root.dim
+              onClicked: root.restoreCheckpoint(cpItem.modelData)
+            }
+          }
+        }
+
         // AI agents: one click gives Claude Code / Codex the skill and the Stop hook.
         Item {
           visible: root.source !== null && root.source.initialized && root.source.agents.length > 0
@@ -473,7 +559,7 @@ Panel {
 
         Text {
           width: parent.width
-          text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · s keep · v diff · r refresh"
+          text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · s keep · v diff · c checkpoint · r refresh"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

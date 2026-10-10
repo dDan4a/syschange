@@ -60,13 +60,20 @@ func (s *Store) Initialized() bool {
 // git runs git against the shadow repository. Pathspecs are literal, so a file
 // named "*" or ":(glob)x" is just a file.
 func (s *Store) git(stdin []byte, args ...string) ([]byte, error) {
+	return s.gitEnv(nil, stdin, args...)
+}
+
+func (s *Store) gitEnv(env []string, stdin []byte, args ...string) ([]byte, error) {
 	base := []string{
 		"--git-dir=" + s.gitDir(), "--work-tree=" + s.ConfigDir, "--literal-pathspecs",
 		"-c", "core.quotepath=off", "-c", "user.name=syschange", "-c", "user.email=syschange@localhost",
 		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
 	}
 	cmd := exec.Command("git", append(base, args...)...)
-	cmd.Dir = s.ConfigDir // git apply resolves paths against the working directory
+	cmd.Dir = s.ConfigDir // pathspecs like "." resolve against the working directory
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}

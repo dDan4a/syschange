@@ -492,3 +492,58 @@ func TestAttributionFromToolCalls(t *testing.T) {
 		t.Fatalf("recorded %+v %v", e.Changes, err)
 	}
 }
+
+func TestCheckpointRestore(t *testing.T) {
+	s, pkgs := newTestStore(t)
+	// The checkpoint includes an unrecorded edit and a new file.
+	write(t, s.ConfigDir, "hypr/bindings.conf", "at checkpoint\n")
+	write(t, s.ConfigDir, "kitty/kitty.conf", "font_size 12\n")
+	if _, err := s.Checkpoint("before experiment"); err != nil {
+		t.Fatal(err)
+	}
+	// The experiment: edit, delete, add, record some of it, install a package.
+	write(t, s.ConfigDir, "hypr/bindings.conf", "experiment\n")
+	os.Remove(filepath.Join(s.ConfigDir, "kitty/kitty.conf"))
+	os.Remove(filepath.Join(s.ConfigDir, "git/config"))
+	write(t, s.ConfigDir, "waybar/config.jsonc", "{}\n")
+	s.Record([]string{"hypr", "git"}, "Experiment", "")
+	*pkgs = append(*pkgs, "waybar")
+
+	hint, err := s.Restore("before experiment", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{"hypr/bindings.conf": "at checkpoint\n", "kitty/kitty.conf": "font_size 12\n", "git/config": "[user]\nname = me\n"} {
+		if b, err := os.ReadFile(filepath.Join(s.ConfigDir, path)); err != nil || string(b) != want {
+			t.Errorf("%s = %q, %v; want %q", path, b, err, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(s.ConfigDir, "waybar/config.jsonc")); err == nil {
+		t.Error("file added after the checkpoint was not removed")
+	}
+	if !strings.Contains(hint, "sudo pacman -Rns waybar") {
+		t.Errorf("hint %q", hint)
+	}
+	if p, _ := s.Pending(); len(p) != 1 || p[0].ID != "pkg:waybar" {
+		t.Errorf("pending after restore: %v", ids(p))
+	}
+	history, _ := s.History()
+	if history[0].Note != "Restore checkpoint: before experiment" {
+		t.Errorf("restore not recorded: %+v", history[0])
+	}
+
+	// The state before the restore is a checkpoint too: restoring it undoes the restore.
+	all, _ := s.Checkpoints()
+	if len(all) != 2 || all[0].Name != "Before restoring before experiment" {
+		t.Fatalf("checkpoints %+v", all)
+	}
+	if _, err := s.Restore(all[0].Name, ""); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(s.ConfigDir, "waybar/config.jsonc")); string(b) != "{}\n" {
+		t.Errorf("restore of the restore: waybar = %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(s.ConfigDir, "kitty/kitty.conf")); err == nil {
+		t.Error("kitty should be gone again")
+	}
+}

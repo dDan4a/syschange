@@ -14,6 +14,8 @@ diff and undo it.
 - **Human names**: "Hyprland: Key bindings" instead of `hypr/bindings.lua`.
 - **Undo anything**: a change not recorded yet, or a recorded one later on. Undo takes back only that
   entry's lines, so later edits to the same file survive.
+- **Checkpoints**: save the whole setup before an experiment, unrecorded edits included, and get back to it
+  in one click. The state before a restore is saved too, so a restore can be undone.
 - **Quiet on Omarchy**: an `omarchy update`, a theme or a font switch is recorded by itself as one entry
   ("Theme: tokyo-night"), not dumped on you as dozens of changed files.
 - **Describe with AI**: one click (or `syschange suggest`) and your default agent reads the diff and
@@ -66,6 +68,9 @@ Recorded 2 change(s).
 | `syschange ignore PATH` | never track this path |
 | `syschange log` | the history |
 | `syschange undo ENTRY` | undo a recorded entry (commit from `log`, or its time) |
+| `syschange checkpoint [NAME]` | save the whole setup now |
+| `syschange checkpoints` | list checkpoints |
+| `syschange restore NAME` | bring config files back to a checkpoint; prints the `sudo` commands for packages and services |
 | `syschange export` | Markdown: setup steps and history |
 | `syschange agents [install\|remove]` | connect Claude Code and Codex |
 
@@ -73,7 +78,7 @@ An ID is a file inside `~/.config` (`hypr/bindings.lua`), an app directory (`hyp
 or a group (`packages`, `services`). No ID means everything.
 
 In the bar panel: `↑↓` select, `Enter` describe, `a` describe with AI, `s` keep without a description,
-`v` diff, `r` refresh.
+`v` diff, `c` checkpoint, `r` refresh.
 Each line can be undone or ignored; each history entry can be undone. Undo and "stop tracking an app"
 ask for a second click.
 

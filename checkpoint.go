@@ -77,7 +77,11 @@ func (s *Store) Checkpoint(name string) (Checkpoint, error) {
 	if err != nil {
 		return Checkpoint{}, err
 	}
-	return cp, appendLines(s.path("checkpoints.jsonl"), []string{string(b)})
+	if err := appendLines(s.path("checkpoints.jsonl"), []string{string(b)}); err != nil {
+		return cp, err
+	}
+	s.afterChange()
+	return cp, nil
 }
 
 // Checkpoints returns saved checkpoints, newest first.

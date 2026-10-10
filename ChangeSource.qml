@@ -17,6 +17,7 @@ Item {
   property int intervalSec: 30
   property string exportPath: ""
   property string autoExport: ""    // file the CLI keeps in sync, if any
+  property var backup: null         // {remote, time, error} when a backup remote is set
 
   property bool initialized: true
   property var pending: []      // groups: {key, title, changes: [...]}
@@ -89,6 +90,8 @@ Item {
     exportProcess.command = [binary, "export", "--to", path]
     exportProcess.running = true
   }
+
+  function push() { act(["push"]) }
 
   function checkpoint(name) { act(["checkpoint", name]) }
   function restore(commit) { act(["restore", commit]) }
@@ -194,6 +197,7 @@ Item {
         root.checkpoints = s.checkpoints || []
         root.autoExport = s.autoExport || ""
         root.version = s.version || "0.0.0"
+        root.backup = s.backup || null
         // The shown diff follows the files: reload it when anything changed.
         if (changed && root.diffKey !== "") {
           var still = root.pending.some(function(g) { return g.key === root.diffKey })

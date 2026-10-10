@@ -22,6 +22,8 @@ diff and undo it.
   proposes the line, in your system language. You edit or accept it.
 - **You see which AI agent changed what**, even if it never says so. One click gives Claude Code, Codex,
   Gemini CLI and Grok a skill and hooks; an agent that changed your system records why before it finishes.
+- **Backup to your own git repository**: `syschange remote set git@github.com:you/setup.git` and every change
+  is pushed in the background. Dotfiles on autopilot, with a reason for each change.
 - **Markdown export**: the history with every change, what is not recorded yet, and the commands to repeat
   your setup on a new machine. One click in the panel, or keep a file (in Obsidian, your dotfiles…) updated
   after every change with `syschange export --auto FILE`.
@@ -79,6 +81,8 @@ Recorded 2 change(s).
 | `syschange checkpoint [NAME]` | save the whole setup now |
 | `syschange checkpoints` | list checkpoints |
 | `syschange restore NAME` | bring config files back to a checkpoint; prints the `sudo` commands for packages and services |
+| `syschange remote [set URL\|off]` | back the history up to a private git repository |
+| `syschange push` | push now; it also happens by itself after every change |
 | `syschange export [--to FILE]` | Markdown: history and setup steps |
 | `syschange export --auto FILE\|off` | keep FILE updated after every record |
 | `syschange agents [install\|remove]` | connect Claude Code and Codex |
@@ -135,6 +139,17 @@ turn, so an agent is never stuck in a loop. Records made by an agent carry its n
 
 Only want the skill? It also installs with [skills](https://github.com/vercel-labs/skills):
 `npx skills add dDan4a/syschange`.
+
+## Backup
+
+`syschange remote set URL` takes any git URL: a private GitHub repo, a server, a path on a USB disk. The remote
+gets the branch `config` (the history of `~/.config`), the branch `state` (the journal, package and service
+lists, AUR packages, checkpoints) and the checkpoint refs. After every recorded change and every checkpoint,
+a background push sends them; it never asks for a password, so use SSH keys or a credential helper. The cloud
+icon in the panel shows the last push and turns red when it fails.
+
+**Keep that repository private.** Files that look like secrets never enter the history, but the rest of your
+config does.
 
 ## Where things live
 

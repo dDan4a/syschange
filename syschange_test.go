@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -591,5 +592,58 @@ func TestAutoExport(t *testing.T) {
 	s.Record(nil, "After off", "")
 	if b, _ := os.ReadFile(out); strings.Contains(string(b), "After off") {
 		t.Fatal("auto export still on")
+	}
+}
+
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"--git-dir=" + dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestBackupRemote(t *testing.T) {
+	s, _ := newTestStore(t)
+	s.ListForeign = func() ([]string, error) { return []string{"yay-bin"}, nil }
+	remote := filepath.Join(t.TempDir(), "backup.git")
+	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
+
+	write(t, s.ConfigDir, "hypr/bindings.conf", "pushed\n")
+	s.Record(nil, "Before the backup", "")
+	if err := s.SetRemote(remote); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitIn(t, remote, "show", "config:hypr/bindings.conf"); got != "pushed" {
+		t.Fatalf("config branch: %q", got)
+	}
+	if got := gitIn(t, remote, "show", "state:journal.jsonl"); !strings.Contains(got, "Before the backup") {
+		t.Fatalf("state branch: %q", got)
+	}
+	if got := gitIn(t, remote, "show", "state:packages.aur.txt"); got != "yay-bin" {
+		t.Fatalf("aur list: %q", got)
+	}
+	if st := s.LastPush(); st == nil || st.Error != "" || st.Remote != remote {
+		t.Fatalf("push status %+v", st)
+	}
+
+	// Nothing new: no new state commit. A checkpoint: its ref goes along.
+	before := gitIn(t, remote, "rev-parse", "state")
+	s.Push()
+	if gitIn(t, remote, "rev-parse", "state") != before {
+		t.Fatal("an unchanged state made a new commit")
+	}
+	s.Checkpoint("cp")
+	s.Push()
+	if refs := gitIn(t, remote, "for-each-ref", "refs/checkpoints"); refs == "" {
+		t.Fatal("checkpoint ref not pushed")
+	}
+
+	// A broken remote is reported, not hidden.
+	s.SetRemote("")
+	s.git(nil, "remote", "add", backupRemote, filepath.Join(t.TempDir(), "missing.git"))
+	if err := s.Push(); err == nil || s.LastPush().Error == "" {
+		t.Fatal("push to a missing remote must fail and be noted")
 	}
 }

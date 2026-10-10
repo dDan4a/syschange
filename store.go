@@ -22,6 +22,8 @@ type Store struct {
 	// Listers are swapped out in tests.
 	ListPackages func() ([]string, error)
 	ListUnits    func() ([]string, error)
+	ListForeign  func() ([]string, error) // AUR packages, for the backup
+	SpawnPush    func()                   // background push after a change; nil in tests
 }
 
 func DefaultStore() (*Store, error) {
@@ -34,7 +36,8 @@ func DefaultStore() (*Store, error) {
 		config = envOr("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	}
 	state := filepath.Join(envOr("XDG_STATE_HOME", filepath.Join(home, ".local", "state")), "syschange")
-	return &Store{ConfigDir: config, StateDir: state, ListPackages: pacmanExplicit, ListUnits: enabledUnits}, nil
+	return &Store{ConfigDir: config, StateDir: state, ListPackages: pacmanExplicit, ListUnits: enabledUnits,
+		ListForeign: func() ([]string, error) { return foreignPackages(), nil }, SpawnPush: spawnPush}, nil
 }
 
 func envOr(key, fallback string) string {

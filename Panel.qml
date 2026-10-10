@@ -486,6 +486,18 @@ Panel {
             fontFamily: root.fontFamily
           }
           PanelActionButton {
+            id: backupButton
+            readonly property var b: root.source ? root.source.backup : null
+            visible: b !== null
+            anchors.right: exportButton.left
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: b && b.error ? "󰅤" : "󰅠" // nf-md-cloud_alert / nf-md-cloud_upload
+            foreground: b && b.error ? Color.urgent : root.dim
+            tooltipText: !b ? "" : b.error ? "Backup to " + b.remote + " failed: " + b.error + ". Click to retry"
+              : "Backed up to " + b.remote + (b.time ? ", " + root.ago(b.time) : "") + ". Click to push now"
+            onClicked: root.source.push()
+          }
+          PanelActionButton {
             id: exportButton
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter

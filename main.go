@@ -38,6 +38,8 @@ Usage:
   syschange checkpoints                list them
   syschange restore NAME               bring config files back to a checkpoint
   syschange undo ENTRY                 undo a recorded entry (its commit, or time from status --json)
+  syschange remote [set URL | off]     back the history up to a private git repository
+  syschange push                       push now (it happens by itself after every change)
   syschange export [--to FILE]         history and setup steps as Markdown
   syschange export --auto FILE|off     keep FILE updated after every record
   syschange agents [install [NAME...]|remove]
@@ -73,6 +75,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	color := fs.Bool("color", false, "colored diff even when not writing to a terminal")
+	quiet := fs.Bool("quiet", false, "push: print nothing")
 	exportTo := fs.String("to", "", "export: write to this file instead of stdout")
 	autoExport := fs.String("auto", "", "export: keep this file updated after every record; off to stop")
 	agentName := fs.String("agent", "", "agent for suggest; default: Omarchy's default agent")
@@ -158,6 +161,44 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return s.Ignore(args[0])
 	case "log":
 		return printLog(s, stdout)
+	case "remote":
+		switch {
+		case len(args) == 2 && args[0] == "set":
+			if err := s.SetRemote(args[1]); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "Backed up to %s. Every change is pushed from now on.\nKeep that repository private: it holds your config files.\n", args[1])
+			return nil
+		case len(args) == 1 && args[0] == "off":
+			if err := s.SetRemote(""); err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, "Backup is off. The remote keeps what it has.")
+			return nil
+		case len(args) == 0:
+			if url := s.RemoteURL(); url != "" {
+				fmt.Fprintln(stdout, url)
+				if st := s.LastPush(); st != nil {
+					state := "ok"
+					if st.Error != "" {
+						state = st.Error
+					}
+					fmt.Fprintf(stdout, "last push %s: %s\n", st.Time.Format("2006-01-02 15:04"), state)
+				}
+			} else {
+				fmt.Fprintln(stdout, "No backup remote. Set one: syschange remote set URL")
+			}
+			return nil
+		}
+		return errors.New("usage: syschange remote [set URL | off]")
+	case "push":
+		if err := s.Push(); err != nil {
+			return err
+		}
+		if !*quiet {
+			fmt.Fprintf(stdout, "Pushed to %s.\n", s.RemoteURL())
+		}
+		return nil
 	case "export":
 		switch {
 		case *autoExport == "off":
@@ -252,6 +293,7 @@ type statusJSON struct {
 	Checkpoints []Checkpoint `json:"checkpoints"`
 	AutoExport  string       `json:"autoExport"` // file kept in sync, if any
 	Version     string       `json:"version"`
+	Backup      *PushStatus  `json:"backup,omitempty"`
 }
 
 func status(s *Store, w io.Writer, asJSON bool) error {
@@ -275,6 +317,12 @@ func status(s *Store, w io.Writer, asJSON bool) error {
 		}
 		out.History = history[:min(len(history), 50)]
 		out.AutoExport = s.autoExportPath()
+		if url := s.RemoteURL(); url != "" {
+			out.Backup = &PushStatus{Remote: url}
+			if st := s.LastPush(); st != nil && st.Remote == url {
+				out.Backup = st
+			}
+		}
 		checkpoints, err := s.Checkpoints()
 		if err != nil {
 			return err

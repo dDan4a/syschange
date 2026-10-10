@@ -75,13 +75,21 @@ func (s *Store) record(items []string, note, by, undoes string) (Entry, error) {
 	if err := s.appendJournal(entry); err != nil {
 		return entry, err
 	}
-	// The change is recorded either way; a failed export only warns.
+	s.afterChange()
+	return entry, nil
+}
+
+// afterChange keeps the Markdown export and the backup remote in step with
+// the history. The change is recorded either way; these only warn.
+func (s *Store) afterChange() {
 	if path := s.autoExportPath(); path != "" {
 		if err := s.ExportTo(path); err != nil {
 			fmt.Fprintln(os.Stderr, "syschange: auto export:", err)
 		}
 	}
-	return entry, nil
+	if s.SpawnPush != nil && s.RemoteURL() != "" {
+		s.SpawnPush()
+	}
 }
 
 func (s *Store) acceptItems(file, kind string, chosen []Change) error {

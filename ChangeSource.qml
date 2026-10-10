@@ -25,7 +25,11 @@ Item {
   property int count: 0
   property var agents: []       // installed coding agents: {name, connected}
   readonly property bool agentsConnected: agents.length > 0 && agents.every(function(a) { return a.connected })
-  property string error: ""
+  // Errors of the last action stay until the next action; a later status poll
+  // must not wipe "run this as root" or "undo it by hand".
+  property string statusError: ""
+  property string actionError: ""
+  readonly property string error: actionError !== "" ? actionError : statusError
   property string notice: ""        // commands to run as root after an undo or restore
   property var checkpoints: []
   property string diffKey: ""       // group whose diff is shown inline
@@ -37,8 +41,10 @@ Item {
   // A ready AI description for a group; the panel opens it for editing.
   signal suggested(string key, string text)
 
+  property bool refreshAgain: false
   function refresh() {
-    if (statusProcess.running) return
+    // A poll already running may predate the last action: run once more after it.
+    if (statusProcess.running) { refreshAgain = true; return }
     // Through sh, so a missing binary is a clear exit 127 instead of a failed spawn.
     statusProcess.command = ["sh", "-c", 'command -v "$0" >/dev/null 2>&1 || exit 127; exec "$0" status --json', binary]
     statusProcess.running = true
@@ -67,10 +73,21 @@ Item {
     installPoll.restart()
   }
 
+  // Actions run one at a time, in order; quick clicks queue up instead of
+  // getting lost. "--" keeps free text (a note starting with "-") from being
+  // read as a flag.
+  property var queue: []
   function act(args) {
-    if (actionProcess.running) return
+    queue = queue.concat([args])
+    if (!actionProcess.running) runNext()
+  }
+  function runNext() {
+    if (queue.length === 0) return
+    var args = queue[0]
+    queue = queue.slice(1)
     notice = ""
-    actionProcess.command = [binary].concat(args)
+    actionError = ""
+    actionProcess.command = [binary, args[0], "--"].concat(args.slice(1))
     actionProcess.running = true
   }
 
@@ -144,11 +161,12 @@ Item {
       "--title=System changes", "-e", "sh", "-c", '"$0" diff --color "$1" | less -R', binary, key])
   }
 
-  function failure(text) {
+  function message(text) {
     var msg = String(text || "").trim().replace(/^syschange: /, "")
     if (msg === "") msg = "syschange failed"
-    error = msg.length > 400 ? msg.slice(0, 397) + "..." : msg
+    return msg.length > 400 ? msg.slice(0, 397) + "..." : msg
   }
+  function failure(text) { actionError = message(text) }
 
   Component.onCompleted: refresh()
 
@@ -183,8 +201,9 @@ Item {
     stderr: StdioCollector { id: statusErr; waitForEnd: true }
     onExited: function(exitCode) {
       root.missing = exitCode === 127
-      if (root.missing) { root.error = ""; root.initialized = false; return }
-      if (exitCode !== 0) { root.failure(statusErr.text || statusOut.text); return }
+      if (root.refreshAgain) { root.refreshAgain = false; Qt.callLater(root.refresh) }
+      if (root.missing) { root.statusError = ""; root.initialized = false; return }
+      if (exitCode !== 0) { root.statusError = root.message(statusErr.text || statusOut.text); return }
       try {
         var changed = statusOut.text !== root.lastStatus
         root.lastStatus = statusOut.text
@@ -203,7 +222,7 @@ Item {
           var still = root.pending.some(function(g) { return g.key === root.diffKey })
           root.showDiff(still ? root.diffKey : "")
         }
-        root.error = ""
+        root.statusError = ""
       } catch (e) {
         root.failure("unexpected output from syschange status")
       }
@@ -225,7 +244,7 @@ Item {
     id: diffProcess
     stdout: StdioCollector { id: diffOut; waitForEnd: true }
     onExited: function(exitCode) {
-      if (exitCode === 0) root.diffLines = root.parseDiff(diffOut.text)
+      root.diffLines = exitCode === 0 ? root.parseDiff(diffOut.text) : [{ kind: "del", text: "Could not load the diff; press v to see it in a terminal" }]
     }
   }
 
@@ -237,7 +256,6 @@ Item {
       var key = root.suggestingKey
       root.suggestingKey = ""
       if (exitCode !== 0) { root.failure(suggestErr.text || suggestOut.text); return }
-      root.error = ""
       root.suggested(key, String(suggestOut.text || "").trim())
     }
   }
@@ -250,11 +268,11 @@ Item {
       // Reverting a package prints the command to run as root: show it.
       if (exitCode !== 0) root.failure(actionErr.text || actionOut.text)
       else {
-        root.error = ""
         var out = String(actionOut.text || "").trim()
         if (/sudo |systemctl /.test(out)) root.notice = out
       }
       root.refresh()
+      root.runNext()
     }
   }
 }

@@ -185,8 +185,8 @@ func TestCLIHooksAndAgents(t *testing.T) {
 	c := newCLI(t)
 	c.fails("usage: syschange hook", "hook")
 	c.fails("usage: syschange hook", "hook", "cursor")
-	c.ok("hook", "claude", "start")     // empty input: ignored, never an error
-	c.ok("hook", "claude")              // same for the stop hook
+	c.ok("hook", "claude", "start") // empty input: ignored, never an error
+	c.ok("hook", "claude")          // same for the stop hook
 	c.ok("hook", "claude", "pre")
 	if _, err := c.run(`{"session_id":"s"}`, "hook", "claude", "start"); err != nil {
 		t.Fatal(err)
@@ -285,7 +285,9 @@ func TestPackageInstallTime(t *testing.T) {
 	}
 }
 
-func itoa(n int64) string { return strings.TrimSpace(strings.Repeat(" ", 0) + func() string { b, _ := json.Marshal(n); return string(b) }()) }
+func itoa(n int64) string {
+	return strings.TrimSpace(strings.Repeat(" ", 0) + func() string { b, _ := json.Marshal(n); return string(b) }())
+}
 
 func TestCommandsForUndoAndRepeat(t *testing.T) {
 	pkg := func(op, name string) Change { return itemChange("package", op, name) }

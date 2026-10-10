@@ -138,8 +138,13 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		if len(args) == 0 || !slices.Contains([]string{"claude", "codex", "gemini", "grok"}, args[0]) {
 			return errors.New("usage: syschange hook claude|codex|gemini|grok [start]")
 		}
-		if len(args) > 1 && args[1] == "start" {
-			return s.SessionStartHook(args[0], stdin)
+		if len(args) > 1 {
+			switch args[1] {
+			case "start":
+				return s.SessionStartHook(args[0], stdin)
+			case "pre", "post":
+				return s.ToolHook(args[0], args[1] == "pre", stdin)
+			}
 		}
 		return s.StopHook(args[0], stdin, stdout)
 	case "agents":
@@ -186,6 +191,7 @@ func status(s *Store, w io.Writer, asJSON bool) error {
 		if err != nil {
 			return err
 		}
+		s.Attribute(pending)
 		out.Count = len(pending)
 		out.Pending = Groups(pending)
 		history, err := s.History()
@@ -207,7 +213,11 @@ func status(s *Store, w io.Writer, asJSON bool) error {
 	for _, g := range out.Pending {
 		fmt.Fprintf(w, "%s  [%s]\n", g.Title, g.Key)
 		for _, c := range g.Changes {
-			fmt.Fprintf(w, "  %s %s%s\n", opSign(c.Op), c.Label, lineStat(c))
+			by := ""
+			if c.By != "" {
+				by = "  [" + c.By + "]"
+			}
+			fmt.Fprintf(w, "  %s %s%s%s\n", opSign(c.Op), c.Label, lineStat(c), by)
 		}
 	}
 	fmt.Fprintln(w, "\nRecord with: syschange note \"why\" [ID...]   undo with: syschange revert ID...")

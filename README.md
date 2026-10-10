@@ -18,8 +18,8 @@ diff and undo it.
   ("Theme: tokyo-night"), not dumped on you as dozens of changed files.
 - **Describe with AI**: one click (or `syschange suggest`) and your default agent reads the diff and
   proposes the line, in your system language. You edit or accept it.
-- **AI agents describe their own changes.** One click gives Claude Code, Codex, Gemini CLI and Grok a skill
-  and hooks. When an agent changed your system during a session, it records why before it finishes.
+- **You see which AI agent changed what**, even if it never says so. One click gives Claude Code, Codex,
+  Gemini CLI and Grok a skill and hooks; an agent that changed your system records why before it finishes.
 - **Export** to Markdown: the steps to repeat your setup on a new machine, plus the history.
 - **Omarchy bar widget**: new changes, history, describe, diff, undo.
 
@@ -100,16 +100,20 @@ syschange agents install     # or the Connect button in the bar panel
 
 | Agent | Skill | Hooks |
 |---|---|---|
-| Claude Code | `~/.claude/skills` | `SessionStart` + `Stop` in `~/.claude/settings.json` |
-| Codex | `~/.agents/skills`, `~/.codex/skills` | `SessionStart` + `Stop` in `~/.codex/hooks.json` |
-| Gemini CLI | `~/.agents/skills` | `SessionStart` + `AfterAgent` in `~/.gemini/settings.json` |
-| Grok | `~/.grok/skills` | its own file `~/.grok/hooks/syschange.json` |
+| Claude Code | `~/.claude/skills` | `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` in `~/.claude/settings.json` |
+| Codex | `~/.agents/skills`, `~/.codex/skills` | the same four in `~/.codex/hooks.json` |
+| Gemini CLI | `~/.agents/skills` | `SessionStart`, `BeforeTool`, `AfterTool`, `AfterAgent` in `~/.gemini/settings.json` |
+| Grok | `~/.grok/skills` | the same four as Claude, in its own file `~/.grok/hooks/syschange.json` |
 
 Only agents whose config directory exists are touched. Edited files keep their key order, and the previous
 version is saved as `*.syschange.bak`.
 
-`SessionStart` notes when the session began. The stop hook then looks only at what changed **after** that:
-config files modified and packages installed by the agent, not your own pending changes. It asks once per
+**Who changed what.** The tool hooks note when each tool call of an agent started and ended (a timestamp, nothing
+else). A config file modified or a package installed inside such a window is marked with that agent, in the bar
+and in the history, whether or not the agent describes it. The tool hooks only append a line to a file, so they
+don't slow the agent down.
+
+The stop hook asks the agent about the changes of **its own session** only, never about yours. It asks once per
 turn, so an agent is never stuck in a loop. Records made by an agent carry its name in the history.
 `syschange agents remove` undoes all of it.
 

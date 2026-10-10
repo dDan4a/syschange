@@ -18,6 +18,8 @@ type Change struct {
 	Label   string `json:"label"`
 	Added   int    `json:"added,omitempty"` // changed lines, config files only
 	Removed int    `json:"removed,omitempty"`
+	By      string `json:"by,omitempty"`      // agent whose tool call made the change, if known
+	Session string `json:"session,omitempty"` // that agent's session
 }
 
 // Group collects changes that belong to one app (or packages, or services).

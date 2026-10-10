@@ -449,3 +449,46 @@ func TestSuggest(t *testing.T) {
 		t.Fatal("unsupported agent must fail")
 	}
 }
+
+func TestAttributionFromToolCalls(t *testing.T) {
+	s, _ := newTestStore(t)
+	tool := func(pre bool, id string) {
+		in := `{"session_id":"s-1","tool_use_id":"` + id + `"}`
+		if err := s.ToolHook("claude", pre, strings.NewReader(in)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The user edits a file before the agent's tool call...
+	write(t, s.ConfigDir, "git/config", "[user]\nname = me2\n")
+	past := time.Now().Add(-time.Minute)
+	os.Chtimes(filepath.Join(s.ConfigDir, "git/config"), past, past)
+	// ...and the agent edits another one during its call.
+	tool(true, "t1")
+	write(t, s.ConfigDir, "hypr/bindings.conf", "agent\n")
+	tool(false, "t1")
+
+	pending, _ := s.Pending()
+	s.Attribute(pending)
+	by := map[string]string{}
+	for _, c := range pending {
+		by[c.ID] = c.By
+	}
+	if by["hypr/bindings.conf"] != "claude" || by["git/config"] != "" {
+		t.Fatalf("attribution %v", by)
+	}
+
+	// The stop hook asks only about this session's change, not the user's.
+	var out bytes.Buffer
+	transcript := filepath.Join(t.TempDir(), "t.jsonl")
+	os.WriteFile(transcript, []byte(`{"timestamp":"`+time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)+`"}`+"\n"), 0o600)
+	s.StopHook("claude", strings.NewReader(`{"session_id":"s-1","transcript_path":"`+transcript+`"}`), &out)
+	if !strings.Contains(out.String(), "hypr/bindings.conf") || strings.Contains(out.String(), "git/config") {
+		t.Fatalf("stop hook: %s", out.String())
+	}
+
+	// The history keeps who made each change.
+	e, err := s.Record([]string{"hypr"}, "", "")
+	if err != nil || e.Changes[0].By != "claude" {
+		t.Fatalf("recorded %+v %v", e.Changes, err)
+	}
+}

@@ -78,6 +78,15 @@ Panel {
   function ignoreGroup(group) { confirm("ignore:" + group.key, function() { root.source.ignore(group.key + "/") }) }
   function undoEntry(entry) { confirm("undo:" + entry.time, function() { root.source.undo(entry.time) }) }
 
+  // Who wrote the entry, or else which agents made its changes.
+  function entryAuthor(e) {
+    if (e.by) return e.by
+    var seen = []
+    for (var i = 0; i < e.changes.length; i++)
+      if (e.changes[i].by && seen.indexOf(e.changes[i].by) < 0) seen.push(e.changes[i].by)
+    return seen.join(", ")
+  }
+
   function sign(op) { return op === "added" ? "+" : op === "removed" ? "−" : "~" }
   function opColor(op) { return op === "added" ? Color.accent : op === "removed" ? Color.urgent : root.foreground }
   function changeText(c) {
@@ -85,6 +94,7 @@ Panel {
     if (c.kind === "package") text = (c.op === "added" ? "Installed " : "Removed ") + c.label
     else if (c.kind === "unit") text = (c.op === "added" ? "Enabled " : "Disabled ") + c.label
     if (c.added || c.removed) text += "  +" + (c.added || 0) + " −" + (c.removed || 0)
+    if (c.by) text += "  󰚩 " + c.by
     return text
   }
 
@@ -397,7 +407,7 @@ Panel {
               Text {
                 width: parent.width
                 text: entryItem.armed ? "Click again to undo this"
-                  : (entryItem.modelData.note || "No description") + (entryItem.modelData.by ? "  󰚩 " + entryItem.modelData.by : "")
+                  : (entryItem.modelData.note || "No description") + (root.entryAuthor(entryItem.modelData) ? "  󰚩 " + root.entryAuthor(entryItem.modelData) : "")
                 color: entryItem.armed ? Color.urgent : entryItem.modelData.note ? root.foreground : root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body

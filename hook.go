@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -92,9 +93,17 @@ func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error 
 	if err != nil {
 		return err
 	}
+	// Tool-call windows say exactly which changes this session made; without
+	// them (older setups), fall back to everything changed since it started.
+	s.Attribute(pending)
+	tracked := slices.ContainsFunc(s.windows(), func(w window) bool { return w.Agent == agent && w.Session == in.session() })
 	var mine []Change
 	for _, c := range pending {
-		if changedSince(s, c, started) {
+		if tracked {
+			if c.By == agent && c.Session == in.session() {
+				mine = append(mine, c)
+			}
+		} else if changedSince(s, c, started) {
 			mine = append(mine, c)
 		}
 	}
@@ -170,6 +179,11 @@ func changedSince(s *Store, c Change, t time.Time) bool {
 var pacmanDB = "/var/lib/pacman/local"
 
 func packageInstalledAfter(name string, t time.Time) bool {
+	at, ok := packageInstallTime(name)
+	return ok && at.After(t)
+}
+
+func packageInstallTime(name string) (time.Time, bool) {
 	dirs, _ := filepath.Glob(filepath.Join(pacmanDB, name+"-*"))
 	for _, dir := range dirs {
 		desc, err := os.ReadFile(filepath.Join(dir, "desc"))
@@ -181,9 +195,9 @@ func packageInstalledAfter(name string, t time.Time) bool {
 			continue
 		}
 		sec, err := strconv.ParseInt(field(fields, "%INSTALLDATE%"), 10, 64)
-		return err == nil && time.Unix(sec, 0).After(t)
+		return time.Unix(sec, 0), err == nil
 	}
-	return false
+	return time.Time{}, false
 }
 
 func field(lines []string, key string) string {

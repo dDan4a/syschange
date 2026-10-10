@@ -23,7 +23,9 @@ type agent struct {
 	HookFile  string   // JSON file with {"hooks": {"<Event>": [...]}}
 	OwnFile   bool     // HookFile belongs to syschange alone (Grok reads every file in its hooks dir)
 	StopEvent string   // the event fired when the agent is about to finish its turn
-	TimeoutMS bool     // hook timeout is in milliseconds, not seconds
+	PreEvent  string   // before and after every tool call
+	PostEvent string
+	TimeoutMS bool // hook timeout is in milliseconds, not seconds
 }
 
 func agents(home string) []agent {
@@ -32,29 +34,44 @@ func agents(home string) []agent {
 		{
 			Name: "claude", Home: filepath.Join(home, ".claude"),
 			SkillDirs: []string{filepath.Join(home, ".claude", "skills")},
-			HookFile:  filepath.Join(home, ".claude", "settings.json"), StopEvent: "Stop",
+			HookFile:  filepath.Join(home, ".claude", "settings.json"), StopEvent: "Stop", PreEvent: "PreToolUse", PostEvent: "PostToolUse",
 		},
 		{
 			Name: "codex", Home: filepath.Join(home, ".codex"),
 			SkillDirs: []string{shared, filepath.Join(home, ".codex", "skills")},
-			HookFile:  filepath.Join(home, ".codex", "hooks.json"), StopEvent: "Stop",
+			HookFile:  filepath.Join(home, ".codex", "hooks.json"), StopEvent: "Stop", PreEvent: "PreToolUse", PostEvent: "PostToolUse",
 		},
 		{
 			Name: "gemini", Home: filepath.Join(home, ".gemini"),
 			SkillDirs: []string{shared},
-			HookFile:  filepath.Join(home, ".gemini", "settings.json"), StopEvent: "AfterAgent", TimeoutMS: true,
+			HookFile:  filepath.Join(home, ".gemini", "settings.json"), StopEvent: "AfterAgent", PreEvent: "BeforeTool", PostEvent: "AfterTool", TimeoutMS: true,
 		},
 		{
 			Name: "grok", Home: filepath.Join(home, ".grok"),
 			SkillDirs: []string{filepath.Join(home, ".grok", "skills")},
-			HookFile:  filepath.Join(home, ".grok", "hooks", "syschange.json"), OwnFile: true, StopEvent: "Stop",
+			HookFile:  filepath.Join(home, ".grok", "hooks", "syschange.json"), OwnFile: true, StopEvent: "Stop", PreEvent: "PreToolUse", PostEvent: "PostToolUse",
 		},
 	}
 }
 
-// events are the hooks syschange adds: the stop gate, and session start to
-// remember when the session began.
-func (a agent) events() []string { return []string{"SessionStart", a.StopEvent} }
+// events are the hooks syschange adds: session start, the tool-call window for
+// attribution, and the stop gate.
+func (a agent) events() []string {
+	return []string{"SessionStart", a.PreEvent, a.PostEvent, a.StopEvent}
+}
+
+// hookArg is the syschange hook sub-argument for an agent event.
+func (a agent) hookArg(event string) string {
+	switch event {
+	case "SessionStart":
+		return " start"
+	case a.PreEvent:
+		return " pre"
+	case a.PostEvent:
+		return " post"
+	}
+	return ""
+}
 
 func (a agent) installed() bool {
 	info, err := os.Stat(a.Home)
@@ -88,12 +105,8 @@ func (g *Agents) skillPath() string {
 	return filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(g.Home, ".local", "share")), "syschange", "skills", "syschange")
 }
 
-func (g *Agents) hookCommand(name, event string) string {
-	cmd := shellQuote(g.Exe) + " hook " + name
-	if event == "SessionStart" {
-		cmd += " start"
-	}
-	return cmd
+func (g *Agents) hookCommand(a agent, event string) string {
+	return shellQuote(g.Exe) + " hook " + a.Name + a.hookArg(event)
 }
 
 func (g *Agents) Status() ([]AgentState, error) {
@@ -200,7 +213,7 @@ func (g *Agents) Remove() error {
 }
 
 // hookMarker finds our hook in a file whatever path the binary had.
-const hookMarker = `syschange'? hook (claude|codex|gemini|grok)( start)?$`
+const hookMarker = `syschange'? hook (claude|codex|gemini|grok)( start| pre| post)?$`
 
 func hasHook(file, event string) (bool, error) {
 	if _, err := os.Stat(file); err != nil {
@@ -223,11 +236,14 @@ func (g *Agents) addHooks(a agent) error {
 			return err
 		}
 	}
-	timeout := 30
-	if a.TimeoutMS {
-		timeout = 30000
-	}
 	for _, ev := range a.events() {
+		timeout := 30
+		if ev == a.PreEvent || ev == a.PostEvent {
+			timeout = 5 // runs on every tool call: must never hold the agent up
+		}
+		if a.TimeoutMS {
+			timeout *= 1000
+		}
 		if ok, err := hasHook(a.HookFile, ev); err != nil || ok {
 			if err != nil {
 				return err
@@ -235,7 +251,7 @@ func (g *Agents) addHooks(a agent) error {
 			continue
 		}
 		if err := jqEdit(a.HookFile, `.hooks[$ev] += [{"hooks": [{"type": "command", "command": $cmd, "timeout": $t}]}]`,
-			"--arg", "ev", ev, "--arg", "cmd", g.hookCommand(a.Name, ev), "--argjson", "t", fmt.Sprint(timeout)); err != nil {
+			"--arg", "ev", ev, "--arg", "cmd", g.hookCommand(a, ev), "--argjson", "t", fmt.Sprint(timeout)); err != nil {
 			return err
 		}
 	}

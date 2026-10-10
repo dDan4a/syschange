@@ -41,6 +41,7 @@ func (s *Store) record(items []string, note, by, undoes string) (Entry, error) {
 	if len(chosen) == 0 {
 		return Entry{}, errors.New("nothing to record: no pending change matches")
 	}
+	s.Attribute(chosen) // the history keeps which agent made each change
 	entry := Entry{Time: time.Now(), Note: strings.TrimSpace(note), By: by, Title: groupTitles(chosen), Undoes: undoes, Changes: chosen}
 
 	var paths []string

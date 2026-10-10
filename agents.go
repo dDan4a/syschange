@@ -111,8 +111,11 @@ func (g *Agents) skillPath() string {
 	return filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(g.Home, ".local", "share")), "syschange", "skills", "syschange")
 }
 
+// hookCommand does nothing when the binary is gone, so uninstalling syschange
+// without disconnecting never breaks the agent's tool calls.
 func (g *Agents) hookCommand(a agent, event string) string {
-	return shellQuote(g.Exe) + " hook " + a.Name + a.hookArg(event)
+	exe := shellQuote(g.Exe)
+	return "[ -x " + exe + " ] && " + exe + " hook " + a.Name + a.hookArg(event) + " || true"
 }
 
 func (g *Agents) Status() ([]AgentState, error) {
@@ -223,7 +226,7 @@ func (g *Agents) Remove() error {
 }
 
 // hookMarker finds our hook in a file whatever path the binary had.
-const hookMarker = `syschange'? hook (claude|codex|gemini|grok)( start| pre| post)?$`
+const hookMarker = `syschange'? hook (claude|codex|gemini|grok)( start| pre| post)?( \|\| true)?$`
 
 func hasHook(file, event string) (bool, error) {
 	if _, err := os.Stat(file); err != nil {

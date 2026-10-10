@@ -222,9 +222,9 @@ func TestAgentsInstallRemove(t *testing.T) {
 		t.Fatalf("status %+v %v", states, err)
 	}
 	settings, _ := os.ReadFile(filepath.Join(home, ".claude/settings.json"))
-	if !strings.HasPrefix(string(settings), "{\n  \"model\"") || strings.Count(string(settings), "hook claude\"") != 1 ||
+	if !strings.HasPrefix(string(settings), "{\n  \"model\"") || strings.Count(string(settings), "hook claude || true\"") != 1 ||
 		strings.Count(string(settings), "hook claude start") != 1 ||
-		!strings.Contains(string(settings), `"'/opt/my bin/syschange' hook claude"`) || !strings.Contains(string(settings), `"other"`) {
+		!strings.Contains(string(settings), `"[ -x '/opt/my bin/syschange' ] && '/opt/my bin/syschange' hook claude || true"`) || !strings.Contains(string(settings), `"other"`) {
 		t.Fatalf("settings.json:\n%s", settings)
 	}
 	for _, p := range []string{".agents/skills/syschange/SKILL.md", ".grok/skills/syschange/SKILL.md"} {

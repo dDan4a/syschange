@@ -547,3 +547,24 @@ func TestCheckpointRestore(t *testing.T) {
 		t.Error("kitty should be gone again")
 	}
 }
+
+func TestAgentsInstallOnlyNamed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
+	g := &Agents{Home: home, Exe: "/usr/bin/syschange", Default: "claude"}
+	if done, err := g.Install("claude"); err != nil || !slices.Equal(done, []string{"claude"}) {
+		t.Fatalf("install claude: %v %v", done, err)
+	}
+	states, _ := g.Status()
+	if !states[0].Connected || !states[0].Default || states[0].Title != "Claude Code" || states[1].Connected {
+		t.Fatalf("states %+v", states)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex/hooks.json")); err == nil {
+		t.Fatal("codex must stay untouched")
+	}
+	if _, err := g.Install("cursor"); err == nil {
+		t.Fatal("unknown agent must fail")
+	}
+}

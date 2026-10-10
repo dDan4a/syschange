@@ -42,7 +42,7 @@ Item {
   }
 
   function start() { act(["init"]) }
-  function connectAgents() { act(["agents", "install"]) }
+  function connectAgents(names) { act(["agents", "install"].concat(names || [])) }
   function note(key, text) { act(["note", text, key]) }
   function skip(key) { act(["skip", key]) }
   function revert(id) { act(["revert", id]) }

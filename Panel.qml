@@ -101,6 +101,24 @@ Panel {
     return seen.join(", ")
   }
 
+  // Omarchy's default agent comes first and alone; the other installed agents
+  // are offered once it is connected.
+  function agentsToConnect() {
+    if (!root.source) return []
+    var all = root.source.agents
+    var def = all.filter(function(a) { return a["default"] && !a.connected })
+    return def.length > 0 ? def : all.filter(function(a) { return !a.connected })
+  }
+  function agentsCaption() {
+    if (!root.source) return ""
+    var connected = root.source.agents.filter(function(a) { return a.connected }).map(function(a) { return a.title })
+    var next = agentsToConnect()
+    if (next.length === 0) return "󰚩 " + connected.join(", ") + (connected.length > 1 ? " describe the changes they make" : " describes the changes it makes")
+    if (connected.length > 0) return "󰚩 " + connected.join(", ") + " connected. Also:"
+    if (next.length === 1) return "󰚩 Let " + next[0].title + " describe the system changes it makes"
+    return "󰚩 Let your AI agents describe the system changes they make"
+  }
+
   function sign(op) { return op === "added" ? "+" : op === "removed" ? "−" : "~" }
   function opColor(op) { return op === "added" ? Color.accent : op === "removed" ? Color.urgent : root.foreground }
   function changeText(c) {
@@ -586,9 +604,7 @@ Panel {
             anchors.right: connectButton.visible ? connectButton.left : parent.right
             anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
-            text: !root.source ? "" : root.source.agentsConnected
-              ? "󰚩 " + root.source.agents.map(function(a) { return a.name }).join(", ") + " describe the changes they make"
-              : "󰚩 Let your AI agents describe the system changes they make"
+            text: root.agentsCaption()
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -600,10 +616,10 @@ Panel {
             visible: root.source !== null && !root.source.agentsConnected
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: "Connect " + (root.source ? root.source.agents.filter(function(a) { return !a.connected }).map(function(a) { return a.name }).join(" + ") : "")
+            text: "Connect " + root.agentsToConnect().map(function(a) { return a.title }).join(" + ")
             bordered: true
             tooltipText: "Adds the syschange skill and hooks. Undo: syschange agents remove"
-            onClicked: root.source.connectAgents()
+            onClicked: root.source.connectAgents(root.agentsToConnect().map(function(a) { return a.name }))
           }
         }
 

@@ -100,7 +100,7 @@ another with `--agent`. The diff goes to that agent's provider; files that look 
 ### Let agents record what they change
 
 ```bash
-syschange agents install     # or the Connect button in the bar panel
+syschange agents install          # all installed agents; or name some: syschange agents install claude
 ```
 
 | Agent | Skill | Hooks |
@@ -110,7 +110,8 @@ syschange agents install     # or the Connect button in the bar panel
 | Gemini CLI | `~/.agents/skills` | `SessionStart`, `BeforeTool`, `AfterTool`, `AfterAgent` in `~/.gemini/settings.json` |
 | Grok | `~/.grok/skills` | the same four as Claude, in its own file `~/.grok/hooks/syschange.json` |
 
-Only agents whose config directory exists are touched. Edited files keep their key order, and the previous
+The **Connect** button in the panel names Omarchy's default agent (`omarchy default agent`) and connects it first;
+the other installed agents are offered after it. Only agents whose config directory exists are touched. Edited files keep their key order, and the previous
 version is saved as `*.syschange.bak`.
 
 **Who changed what.** The tool hooks note when each tool call of an agent started and ended (a timestamp, nothing

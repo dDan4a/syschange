@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -81,12 +82,17 @@ func (a agent) installed() bool {
 // AgentState says, per installed agent, whether it is connected.
 type AgentState struct {
 	Name      string `json:"name"`
+	Title     string `json:"title"` // "Claude Code"
 	Connected bool   `json:"connected"`
+	Default   bool   `json:"default"` // Omarchy's default agent
 }
 
+var agentTitles = map[string]string{"claude": "Claude Code", "codex": "Codex", "gemini": "Gemini CLI", "grok": "Grok"}
+
 type Agents struct {
-	Home string // user's home
-	Exe  string // absolute path of this binary, used in hook commands
+	Home    string // user's home
+	Exe     string // absolute path of this binary, used in hook commands
+	Default string // Omarchy's default agent, if any
 }
 
 func DefaultAgents() (*Agents, error) {
@@ -98,7 +104,7 @@ func DefaultAgents() (*Agents, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Agents{Home: home, Exe: exe}, nil
+	return &Agents{Home: home, Exe: exe, Default: omarchyDefaultAgent()}, nil
 }
 
 func (g *Agents) skillPath() string {
@@ -123,7 +129,7 @@ func (g *Agents) Status() ([]AgentState, error) {
 			}
 			hooked = hooked && ok
 		}
-		out = append(out, AgentState{Name: a.Name, Connected: hooked && g.hasSkill(a)})
+		out = append(out, AgentState{Name: a.Name, Title: agentTitles[a.Name], Connected: hooked && g.hasSkill(a), Default: a.Name == g.Default})
 	}
 	return out, nil
 }
@@ -137,8 +143,9 @@ func (g *Agents) hasSkill(a agent) bool {
 	return false
 }
 
-// Install connects every installed agent. It is safe to run again.
-func (g *Agents) Install() ([]string, error) {
+// Install connects the named agents, or every installed one when no name is
+// given. It is safe to run again.
+func (g *Agents) Install(names ...string) ([]string, error) {
 	if err := os.MkdirAll(g.skillPath(), 0o755); err != nil {
 		return nil, err
 	}
@@ -147,7 +154,7 @@ func (g *Agents) Install() ([]string, error) {
 	}
 	var done []string
 	for _, a := range agents(g.Home) {
-		if !a.installed() {
+		if !a.installed() || (len(names) > 0 && !slices.Contains(names, a.Name)) {
 			continue
 		}
 		for _, dir := range a.SkillDirs {
@@ -161,6 +168,9 @@ func (g *Agents) Install() ([]string, error) {
 		done = append(done, a.Name)
 	}
 	if len(done) == 0 {
+		if len(names) > 0 {
+			return nil, fmt.Errorf("%s: not installed or not supported (claude, codex, gemini, grok)", strings.Join(names, ", "))
+		}
 		return nil, errors.New("no supported agent found (Claude Code, Codex, Gemini CLI or Grok)")
 	}
 	return done, nil

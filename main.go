@@ -36,7 +36,8 @@ Usage:
   syschange restore NAME               bring config files back to a checkpoint
   syschange undo ENTRY                 undo a recorded entry (its commit, or time from status --json)
   syschange export                     history and setup steps as Markdown
-  syschange agents [install|remove]     connect Claude Code, Codex, Gemini CLI, Grok: skill + hooks
+  syschange agents [install [NAME...]|remove]
+                                       connect Claude Code, Codex, Gemini CLI, Grok: skill + hooks
   syschange hook AGENT [start]         the hooks themselves (read stdin)
 
 ID is a file path inside ~/.config (hypr/bindings.conf), an app directory (hypr),
@@ -293,7 +294,7 @@ func agentsCmd(args []string, w io.Writer) error {
 	}
 	switch action {
 	case "install":
-		done, err := g.Install()
+		done, err := g.Install(args[1:]...)
 		if err != nil {
 			return err
 		}
@@ -318,7 +319,11 @@ func agentsCmd(args []string, w io.Writer) error {
 			if st.Connected {
 				state = "connected"
 			}
-			fmt.Fprintf(w, "%s: %s\n", st.Name, state)
+			def := ""
+			if st.Default {
+				def = " (Omarchy default)"
+			}
+			fmt.Fprintf(w, "%s%s: %s\n", st.Name, def, state)
 		}
 		return nil
 	}

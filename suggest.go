@@ -33,7 +33,9 @@ func (s *Store) Suggest(items []string, agent string) (string, error) {
 		body = body[:maxDiff] + "\n[diff truncated]"
 	}
 	if agent == "" {
-		agent = defaultAgent()
+		if agent = omarchyDefaultAgent(); agent == "" {
+			agent = "claude"
+		}
 	}
 	prompt := fmt.Sprintf(`You label changes to a Linux desktop setup (Arch, Hyprland, Omarchy).
 Reply with ONE line of at most 80 characters that says what this change does for the user: its purpose, not file names.
@@ -56,12 +58,13 @@ Changed: %s
 	return line, nil
 }
 
-// defaultAgent is the agent the user picked in Omarchy (omarchy default agent).
-func defaultAgent() string {
+// omarchyDefaultAgent is the agent the user picked in Omarchy (omarchy default
+// agent), or "" when none is set.
+func omarchyDefaultAgent() string {
 	home, _ := os.UserHomeDir()
 	b, err := os.ReadFile(filepath.Join(envOr("XDG_CONFIG_HOME", filepath.Join(home, ".config")), "omarchy", "defaults", "agent"))
 	if err != nil {
-		return "claude"
+		return ""
 	}
 	return strings.TrimSpace(string(b))
 }

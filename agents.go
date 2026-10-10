@@ -10,33 +10,51 @@ import (
 	"strings"
 )
 
-//go:embed skill/SKILL.md
+//go:embed skills/syschange/SKILL.md
 var skillMD []byte
 
 // agent is a coding agent syschange can connect to: a skill so it knows how to
-// record changes, and a Stop hook so it does not forget to.
+// record changes, and hooks so it does not forget to. All four speak the same
+// hook protocol, with different file locations and event names.
 type agent struct {
 	Name      string
 	Home      string   // the agent's config directory; missing means not installed
 	SkillDirs []string // where it looks for skills
-	HookFile  string   // JSON file with {"hooks": {"Stop": [...]}}
+	HookFile  string   // JSON file with {"hooks": {"<Event>": [...]}}
+	OwnFile   bool     // HookFile belongs to syschange alone (Grok reads every file in its hooks dir)
+	StopEvent string   // the event fired when the agent is about to finish its turn
+	TimeoutMS bool     // hook timeout is in milliseconds, not seconds
 }
 
 func agents(home string) []agent {
+	shared := filepath.Join(home, ".agents", "skills") // read by Codex, Gemini and Grok
 	return []agent{
 		{
 			Name: "claude", Home: filepath.Join(home, ".claude"),
 			SkillDirs: []string{filepath.Join(home, ".claude", "skills")},
-			HookFile:  filepath.Join(home, ".claude", "settings.json"),
+			HookFile:  filepath.Join(home, ".claude", "settings.json"), StopEvent: "Stop",
 		},
 		{
 			Name: "codex", Home: filepath.Join(home, ".codex"),
-			// ~/.agents/skills is the shared location Omarchy and Codex read.
-			SkillDirs: []string{filepath.Join(home, ".agents", "skills"), filepath.Join(home, ".codex", "skills")},
-			HookFile:  filepath.Join(home, ".codex", "hooks.json"),
+			SkillDirs: []string{shared, filepath.Join(home, ".codex", "skills")},
+			HookFile:  filepath.Join(home, ".codex", "hooks.json"), StopEvent: "Stop",
+		},
+		{
+			Name: "gemini", Home: filepath.Join(home, ".gemini"),
+			SkillDirs: []string{shared},
+			HookFile:  filepath.Join(home, ".gemini", "settings.json"), StopEvent: "AfterAgent", TimeoutMS: true,
+		},
+		{
+			Name: "grok", Home: filepath.Join(home, ".grok"),
+			SkillDirs: []string{filepath.Join(home, ".grok", "skills")},
+			HookFile:  filepath.Join(home, ".grok", "hooks", "syschange.json"), OwnFile: true, StopEvent: "Stop",
 		},
 	}
 }
+
+// events are the hooks syschange adds: the stop gate, and session start to
+// remember when the session began.
+func (a agent) events() []string { return []string{"SessionStart", a.StopEvent} }
 
 func (a agent) installed() bool {
 	info, err := os.Stat(a.Home)
@@ -70,8 +88,12 @@ func (g *Agents) skillPath() string {
 	return filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(g.Home, ".local", "share")), "syschange", "skills", "syschange")
 }
 
-func (g *Agents) hookCommand(name string) string {
-	return shellQuote(g.Exe) + " hook " + name
+func (g *Agents) hookCommand(name, event string) string {
+	cmd := shellQuote(g.Exe) + " hook " + name
+	if event == "SessionStart" {
+		cmd += " start"
+	}
+	return cmd
 }
 
 func (g *Agents) Status() ([]AgentState, error) {
@@ -80,9 +102,13 @@ func (g *Agents) Status() ([]AgentState, error) {
 		if !a.installed() {
 			continue
 		}
-		hooked, err := hasHook(a.HookFile)
-		if err != nil {
-			return nil, err
+		hooked := true
+		for _, ev := range a.events() {
+			ok, err := hasHook(a.HookFile, ev)
+			if err != nil {
+				return nil, err
+			}
+			hooked = hooked && ok
 		}
 		out = append(out, AgentState{Name: a.Name, Connected: hooked && g.hasSkill(a)})
 	}
@@ -116,13 +142,13 @@ func (g *Agents) Install() ([]string, error) {
 				return done, err
 			}
 		}
-		if err := g.addHook(a); err != nil {
+		if err := g.addHooks(a); err != nil {
 			return done, err
 		}
 		done = append(done, a.Name)
 	}
 	if len(done) == 0 {
-		return nil, errors.New("no supported agent found (Claude Code or Codex)")
+		return nil, errors.New("no supported agent found (Claude Code, Codex, Gemini CLI or Grok)")
 	}
 	return done, nil
 }
@@ -154,8 +180,18 @@ func (g *Agents) Remove() error {
 				}
 			}
 		}
-		if _, err := os.Stat(a.HookFile); err == nil {
-			if err := jqEdit(a.HookFile, `if .hooks.Stop then .hooks.Stop |= (map(.hooks |= map(select(.command | test($m) | not))) | map(select(.hooks | length > 0))) else . end`, "--arg", "m", hookMarker); err != nil {
+		if _, err := os.Stat(a.HookFile); err != nil {
+			continue
+		}
+		if a.OwnFile {
+			if err := os.Remove(a.HookFile); err != nil {
+				return err
+			}
+			continue
+		}
+		for _, ev := range a.events() {
+			if err := jqEdit(a.HookFile, `if .hooks[$ev] then .hooks[$ev] |= (map(.hooks |= map(select(.command | test($m) | not))) | map(select(.hooks | length > 0))) | if .hooks[$ev] == [] then del(.hooks[$ev]) else . end else . end`,
+				"--arg", "m", hookMarker, "--arg", "ev", ev); err != nil {
 				return err
 			}
 		}
@@ -164,21 +200,22 @@ func (g *Agents) Remove() error {
 }
 
 // hookMarker finds our hook in a file whatever path the binary had.
-const hookMarker = `syschange'? hook (claude|codex)$`
+const hookMarker = `syschange'? hook (claude|codex|gemini|grok)( start)?$`
 
-func hasHook(file string) (bool, error) {
+func hasHook(file, event string) (bool, error) {
 	if _, err := os.Stat(file); err != nil {
 		return false, nil
 	}
-	out, err := exec.Command("jq", "--arg", "m", hookMarker, `[.hooks.Stop[]?.hooks[]?.command | select(test($m))] | length > 0`, file).Output()
+	out, err := exec.Command("jq", "--arg", "m", hookMarker, "--arg", "ev", event,
+		`[.hooks[$ev][]?.hooks[]?.command | select(test($m))] | length > 0`, file).Output()
 	if err != nil {
 		return false, fmt.Errorf("jq %s: %w", file, err)
 	}
 	return strings.TrimSpace(string(out)) == "true", nil
 }
 
-func (g *Agents) addHook(a agent) error {
-	if ok, err := hasHook(a.HookFile); err != nil || ok {
+func (g *Agents) addHooks(a agent) error {
+	if err := os.MkdirAll(filepath.Dir(a.HookFile), 0o755); err != nil {
 		return err
 	}
 	if _, err := os.Stat(a.HookFile); errors.Is(err, os.ErrNotExist) {
@@ -186,7 +223,23 @@ func (g *Agents) addHook(a agent) error {
 			return err
 		}
 	}
-	return jqEdit(a.HookFile, `.hooks.Stop += [{"hooks": [{"type": "command", "command": $cmd, "timeout": 30}]}]`, "--arg", "cmd", g.hookCommand(a.Name))
+	timeout := 30
+	if a.TimeoutMS {
+		timeout = 30000
+	}
+	for _, ev := range a.events() {
+		if ok, err := hasHook(a.HookFile, ev); err != nil || ok {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		if err := jqEdit(a.HookFile, `.hooks[$ev] += [{"hooks": [{"type": "command", "command": $cmd, "timeout": $t}]}]`,
+			"--arg", "ev", ev, "--arg", "cmd", g.hookCommand(a.Name, ev), "--argjson", "t", fmt.Sprint(timeout)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // jqEdit rewrites a JSON file with jq, which keeps the user's key order.

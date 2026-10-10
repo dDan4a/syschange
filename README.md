@@ -12,8 +12,8 @@ diff and undo it.
 - **Packages** you installed explicitly (`pacman`, AUR included) and **systemd services** you enabled,
   system and user.
 - **Human names**: "Hyprland: Key bindings" instead of `hypr/bindings.lua`.
-- **AI agents describe their own changes.** One click gives Claude Code and Codex a skill and a Stop
-  hook. When an agent changed your system during a session, it records why before it finishes.
+- **AI agents describe their own changes.** One click gives Claude Code, Codex, Gemini CLI and Grok a skill
+  and hooks. When an agent changed your system during a session, it records why before it finishes.
 - **Export** to Markdown: the steps to repeat your setup on a new machine, plus the history.
 - **Omarchy bar widget**: new changes, history, describe, diff, undo.
 
@@ -70,15 +70,26 @@ The undo button on each line asks for a second click.
 ## AI agents
 
 ```bash
-syschange agents install
+syschange agents install     # or the Connect button in the bar panel
 ```
 
-This links the [skill](skill/SKILL.md) into `~/.claude/skills`, `~/.agents/skills` and `~/.codex/skills`, and adds a
-Stop hook to `~/.claude/settings.json` and `~/.codex/hooks.json` (the original is saved as `*.syschange.bak`).
+| Agent | Skill | Hooks |
+|---|---|---|
+| Claude Code | `~/.claude/skills` | `SessionStart` + `Stop` in `~/.claude/settings.json` |
+| Codex | `~/.agents/skills`, `~/.codex/skills` | `SessionStart` + `Stop` in `~/.codex/hooks.json` |
+| Gemini CLI | `~/.agents/skills` | `SessionStart` + `AfterAgent` in `~/.gemini/settings.json` |
+| Grok | `~/.grok/skills` | its own file `~/.grok/hooks/syschange.json` |
 
-The hook only looks at what changed **during the agent's session**: config files modified and packages
-installed after the session started. It asks once, so an agent is never stuck in a loop.
-Records made by an agent carry its name in the history. `syschange agents remove` undoes all of it.
+Only agents whose config directory exists are touched. Edited files keep their key order, and the previous
+version is saved as `*.syschange.bak`.
+
+`SessionStart` notes when the session began. The stop hook then looks only at what changed **after** that:
+config files modified and packages installed by the agent, not your own pending changes. It asks once per
+turn, so an agent is never stuck in a loop. Records made by an agent carry its name in the history.
+`syschange agents remove` undoes all of it.
+
+Only want the skill? It also installs with [skills](https://github.com/vercel-labs/skills):
+`npx skills add dDan4a/syschange`.
 
 ## Where things live
 

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"golang.org/x/term"
@@ -28,8 +29,8 @@ Usage:
   syschange ignore PATH                never track PATH (a gitignore pattern)
   syschange log                        show the history
   syschange export                     history and setup steps as Markdown
-  syschange agents [install|remove]     connect Claude Code and Codex: skill + Stop hook
-  syschange hook claude|codex          the Stop hook itself (reads stdin)
+  syschange agents [install|remove]     connect Claude Code, Codex, Gemini CLI, Grok: skill + hooks
+  syschange hook AGENT [start]         the hooks themselves (read stdin)
 
 ID is a file path inside ~/.config (hypr/bindings.conf), an app directory (hypr),
 a package or unit name, or a group: packages, services. No ID means all changes.
@@ -104,8 +105,11 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	case "export":
 		return s.Export(stdout)
 	case "hook":
-		if len(args) != 1 || (args[0] != "claude" && args[0] != "codex") {
-			return errors.New("supported hooks: claude, codex")
+		if len(args) == 0 || !slices.Contains([]string{"claude", "codex", "gemini", "grok"}, args[0]) {
+			return errors.New("usage: syschange hook claude|codex|gemini|grok [start]")
+		}
+		if len(args) > 1 && args[1] == "start" {
+			return s.SessionStartHook(args[0], stdin)
 		}
 		return s.StopHook(args[0], stdin, stdout)
 	case "agents":
@@ -114,11 +118,14 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	return fmt.Errorf("unknown command %q, see syschange help", cmd)
 }
 
-// defaultAuthor tags records made from inside Claude Code without the agent
+// defaultAuthor tags records made from inside an agent that marks its shell, without the agent
 // having to remember --by.
 func defaultAuthor() string {
-	if os.Getenv("CLAUDECODE") == "1" {
+	switch {
+	case os.Getenv("CLAUDECODE") == "1":
 		return "claude"
+	case os.Getenv("GEMINI_CLI") == "1":
+		return "gemini"
 	}
 	return ""
 }
@@ -223,7 +230,7 @@ func agentsCmd(args []string, w io.Writer) error {
 			return err
 		}
 		if len(states) == 0 {
-			fmt.Fprintln(w, "No supported agent found (Claude Code or Codex).")
+			fmt.Fprintln(w, "No supported agent found (Claude Code, Codex, Gemini CLI or Grok).")
 		}
 		for _, st := range states {
 			state := "not connected, run: syschange agents install"

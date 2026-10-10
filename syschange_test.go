@@ -207,25 +207,37 @@ func TestAgentsInstallRemove(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 	write(t, home, ".claude/settings.json", `{"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "other"}]}]}}`)
 	os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".gemini"), 0o755)
+	os.MkdirAll(filepath.Join(home, ".grok"), 0o755)
 	g := &Agents{Home: home, Exe: "/opt/my bin/syschange"}
 
 	for range 2 { // installing twice changes nothing
 		done, err := g.Install()
-		if err != nil || !slices.Equal(done, []string{"claude", "codex"}) {
+		if err != nil || !slices.Equal(done, []string{"claude", "codex", "gemini", "grok"}) {
 			t.Fatalf("install: %v %v", done, err)
 		}
 	}
 	states, err := g.Status()
-	if err != nil || len(states) != 2 || !states[0].Connected || !states[1].Connected {
+	if err != nil || len(states) != 4 || slices.ContainsFunc(states, func(s AgentState) bool { return !s.Connected }) {
 		t.Fatalf("status %+v %v", states, err)
 	}
 	settings, _ := os.ReadFile(filepath.Join(home, ".claude/settings.json"))
-	if !strings.HasPrefix(string(settings), "{\n  \"model\"") || strings.Count(string(settings), "hook claude") != 1 ||
+	if !strings.HasPrefix(string(settings), "{\n  \"model\"") || strings.Count(string(settings), "hook claude\"") != 1 ||
+		strings.Count(string(settings), "hook claude start") != 1 ||
 		!strings.Contains(string(settings), `"'/opt/my bin/syschange' hook claude"`) || !strings.Contains(string(settings), `"other"`) {
 		t.Fatalf("settings.json:\n%s", settings)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".agents/skills/syschange/SKILL.md")); err != nil {
-		t.Fatal("codex skill not linked")
+	for _, p := range []string{".agents/skills/syschange/SKILL.md", ".grok/skills/syschange/SKILL.md"} {
+		if _, err := os.Stat(filepath.Join(home, p)); err != nil {
+			t.Fatalf("skill not linked: %s", p)
+		}
+	}
+	gemini, _ := os.ReadFile(filepath.Join(home, ".gemini/settings.json"))
+	if !strings.Contains(string(gemini), `"AfterAgent"`) || !strings.Contains(string(gemini), "30000") {
+		t.Fatalf("gemini settings:\n%s", gemini)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".grok/hooks/syschange.json")); err != nil {
+		t.Fatal("grok hook file missing")
 	}
 
 	if err := g.Remove(); err != nil {
@@ -235,10 +247,56 @@ func TestAgentsInstallRemove(t *testing.T) {
 	if strings.Contains(string(settings), "syschange") || !strings.Contains(string(settings), `"other"`) {
 		t.Fatalf("after remove:\n%s", settings)
 	}
-	if states, _ := g.Status(); states[0].Connected || states[1].Connected {
+	if states, _ := g.Status(); slices.ContainsFunc(states, func(s AgentState) bool { return s.Connected }) {
 		t.Fatalf("still connected: %+v", states)
 	}
 	if _, err := os.Lstat(filepath.Join(home, ".claude/skills/syschange")); err == nil {
 		t.Fatal("skill link left behind")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".grok/hooks/syschange.json")); err == nil {
+		t.Fatal("grok hook file left behind")
+	}
+	if gemini, _ := os.ReadFile(filepath.Join(home, ".gemini/settings.json")); strings.Contains(string(gemini), "AfterAgent") {
+		t.Fatalf("gemini hook left behind:\n%s", gemini)
+	}
+}
+
+func TestStopHookGrokAndGemini(t *testing.T) {
+	s, _ := newTestStore(t)
+	run := func(agent string, start bool, payload string) string {
+		var out bytes.Buffer
+		var err error
+		if start {
+			err = s.SessionStartHook(agent, strings.NewReader(payload))
+		} else {
+			err = s.StopHook(agent, strings.NewReader(payload), &out)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	// Grok: camelCase, no transcript, start time comes from the SessionStart hook.
+	run("grok", true, `{"sessionId":"g-1"}`)
+	write(t, s.ConfigDir, "hypr/bindings.conf", "changed\n")
+	if out := run("grok", false, `{"sessionId":"g-1","stopHookActive":false}`); !strings.Contains(out, `"decision":"block"`) || !strings.Contains(out, "--by grok") {
+		t.Fatalf("grok: %s", out)
+	}
+	if out := run("grok", false, `{"sessionId":"g-1","stopHookActive":true}`); out != "" {
+		t.Fatalf("grok must not block twice: %s", out)
+	}
+	if out := run("grok", false, `{"sessionId":"unknown"}`); out != "" {
+		t.Fatalf("unknown session must not block: %s", out)
+	}
+	// Gemini retries with "deny"; a second SessionStart (resume) keeps the first time.
+	run("gemini", true, `{"session_id":"m-1"}`)
+	first, _ := os.ReadFile(s.sessionFile("gemini", "m-1"))
+	run("gemini", true, `{"session_id":"m-1"}`)
+	if again, _ := os.ReadFile(s.sessionFile("gemini", "m-1")); string(again) != string(first) {
+		t.Fatal("resume reset the session start")
+	}
+	write(t, s.ConfigDir, "voxtype/config.toml", "x\n")
+	if out := run("gemini", false, `{"session_id":"m-1"}`); !strings.Contains(out, `"decision":"deny"`) || !strings.Contains(out, "voxtype/config.toml") {
+		t.Fatalf("gemini: %s", out)
 	}
 }

@@ -12,22 +12,79 @@ import (
 	"time"
 )
 
-// StopHook implements the Stop hook of Claude Code and Codex (same protocol). When the agent changed
-// config files or installed packages during its session and is about to
-// finish, it is asked once to record them with a one-line reason.
-func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error {
-	var in struct {
-		StopHookActive bool   `json:"stop_hook_active"`
-		TranscriptPath string `json:"transcript_path"`
+// hookInput is what Claude Code, Codex and Gemini CLI send (snake_case) and
+// what Grok sends (camelCase).
+type hookInput struct {
+	SessionID      string `json:"session_id"`
+	SessionIDCamel string `json:"sessionId"`
+	StopActive     bool   `json:"stop_hook_active"`
+	StopActiveCaml bool   `json:"stopHookActive"`
+	Transcript     string `json:"transcript_path"`
+	TranscriptCaml string `json:"transcriptPath"`
+}
+
+func (in hookInput) session() string    { return firstNonEmpty(in.SessionID, in.SessionIDCamel) }
+func (in hookInput) transcript() string { return firstNonEmpty(in.Transcript, in.TranscriptCaml) }
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
 	}
+	return b
+}
+
+// SessionStartHook remembers when an agent session began, so the stop hook
+// can tell the agent's changes from the user's.
+func (s *Store) SessionStartHook(agent string, stdin io.Reader) error {
+	var in hookInput
+	if err := json.NewDecoder(stdin).Decode(&in); err != nil || in.session() == "" || !s.Initialized() {
+		return err
+	}
+	dir := s.path("sessions")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	// Resumed and compacted sessions fire SessionStart again: keep the first time.
+	file := s.sessionFile(agent, in.session())
+	if _, err := os.Stat(file); err == nil {
+		return nil
+	}
+	pruneSessions(dir)
+	return os.WriteFile(file, []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0o600)
+}
+
+func (s *Store) sessionFile(agent, id string) string {
+	safe := strings.Map(func(r rune) rune {
+		if r == '/' || r == os.PathSeparator || r == 0 {
+			return '_'
+		}
+		return r
+	}, id)
+	return filepath.Join(s.path("sessions"), agent+"-"+safe)
+}
+
+func pruneSessions(dir string) {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > 30*24*time.Hour {
+			os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+// StopHook runs when an agent is about to finish its turn. If it changed config
+// files or installed packages during its session, it is asked once to record
+// them with a one-line reason.
+func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error {
+	var in hookInput
 	if err := json.NewDecoder(stdin).Decode(&in); err != nil {
 		return err
 	}
 	// Asked once already: never trap the agent in a loop.
-	if in.StopHookActive || !s.Initialized() {
+	if in.StopActive || in.StopActiveCaml || !s.Initialized() {
 		return nil
 	}
-	started, ok := sessionStart(in.TranscriptPath)
+	started, ok := s.sessionStarted(agent, in)
 	if !ok {
 		return nil
 	}
@@ -51,10 +108,27 @@ func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error 
 	}
 	fmt.Fprintf(&b, "\nRun: syschange note --by %s \"<why, in the user's language>\" <id>...\n", agent)
 	b.WriteString("If one of these is not yours, leave it out. To keep a path out of the history for good: syschange ignore <path>.")
-	return json.NewEncoder(stdout).Encode(map[string]string{"decision": "block", "reason": b.String()})
+	decision := "block"
+	if agent == "gemini" {
+		decision = "deny" // Gemini's AfterAgent retries the turn with the reason as the prompt
+	}
+	return json.NewEncoder(stdout).Encode(map[string]string{"decision": decision, "reason": b.String()})
 }
 
-// sessionStart reads the first timestamp in a Claude Code transcript.
+// sessionStarted prefers the time recorded by the SessionStart hook and falls
+// back to the first timestamp in the transcript.
+func (s *Store) sessionStarted(agent string, in hookInput) (time.Time, bool) {
+	if in.session() != "" {
+		if b, err := os.ReadFile(s.sessionFile(agent, in.session())); err == nil {
+			if t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(b))); err == nil {
+				return t, true
+			}
+		}
+	}
+	return sessionStart(in.transcript())
+}
+
+// sessionStart reads the first timestamp in a JSONL transcript (Claude Code, Codex).
 func sessionStart(path string) (time.Time, bool) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -77,6 +151,8 @@ func sessionStart(path string) (time.Time, bool) {
 // changedSince tells whether a change happened after t. Deleted files and
 // services carry no timestamp, so they are left to the user.
 func changedSince(s *Store, c Change, t time.Time) bool {
+	// File times come from a coarse clock and pacman stores whole seconds.
+	t = t.Add(-time.Second)
 	switch c.Kind {
 	case "config":
 		info, err := os.Lstat(filepath.Join(s.ConfigDir, c.Name))

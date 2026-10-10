@@ -30,7 +30,6 @@ type agent struct {
 }
 
 func agents(home string) []agent {
-	shared := filepath.Join(home, ".agents", "skills") // read by Codex, Gemini and Grok
 	return []agent{
 		{
 			Name: "claude", Home: filepath.Join(home, ".claude"),
@@ -39,12 +38,12 @@ func agents(home string) []agent {
 		},
 		{
 			Name: "codex", Home: filepath.Join(home, ".codex"),
-			SkillDirs: []string{shared, filepath.Join(home, ".codex", "skills")},
+			SkillDirs: []string{filepath.Join(home, ".codex", "skills")},
 			HookFile:  filepath.Join(home, ".codex", "hooks.json"), StopEvent: "Stop", PreEvent: "PreToolUse", PostEvent: "PostToolUse",
 		},
 		{
 			Name: "gemini", Home: filepath.Join(home, ".gemini"),
-			SkillDirs: []string{shared},
+			SkillDirs: []string{filepath.Join(home, ".gemini", "skills")},
 			HookFile:  filepath.Join(home, ".gemini", "settings.json"), StopEvent: "AfterAgent", PreEvent: "BeforeTool", PostEvent: "AfterTool", TimeoutMS: true,
 		},
 		{
@@ -155,6 +154,9 @@ func (g *Agents) Install(names ...string) ([]string, error) {
 	if err := os.WriteFile(filepath.Join(g.skillPath(), "SKILL.md"), skillMD, 0o644); err != nil {
 		return nil, err
 	}
+	if err := g.removeLegacySkill(); err != nil {
+		return nil, err
+	}
 	var done []string
 	backups := map[string]bool{}
 	for _, a := range agents(g.Home) {
@@ -198,14 +200,14 @@ func (g *Agents) linkSkill(dir string) error {
 
 // Remove disconnects every agent: our skill links and Stop hooks go away.
 func (g *Agents) Remove() error {
+	if err := g.removeLegacySkill(); err != nil {
+		return err
+	}
 	backups := map[string]bool{}
 	for _, a := range agents(g.Home) {
 		for _, dir := range a.SkillDirs {
-			link := filepath.Join(dir, "syschange")
-			if target, err := os.Readlink(link); err == nil && target == g.skillPath() {
-				if err := os.Remove(link); err != nil {
-					return err
-				}
+			if err := g.unlinkSkill(dir); err != nil {
+				return err
 			}
 		}
 		if _, err := os.Stat(a.HookFile); err != nil {
@@ -226,6 +228,20 @@ func (g *Agents) Remove() error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// removeLegacySkill drops the link v0.1.0 put in the shared ~/.agents/skills,
+// where every agent reading that folder saw it, connected or not.
+func (g *Agents) removeLegacySkill() error {
+	return g.unlinkSkill(filepath.Join(g.Home, ".agents", "skills"))
+}
+
+func (g *Agents) unlinkSkill(dir string) error {
+	link := filepath.Join(dir, "syschange")
+	if target, err := os.Readlink(link); err == nil && target == g.skillPath() {
+		return os.Remove(link)
 	}
 	return nil
 }

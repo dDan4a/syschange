@@ -141,8 +141,13 @@ func TestCLICheckpointsAndExport(t *testing.T) {
 	must(t, c.ok("export"), "# System changes")
 	file := filepath.Join(t.TempDir(), "out.md")
 	must(t, c.ok("export", "--to", file), "Exported to")
-	if _, err := os.Stat(file); err != nil {
-		t.Fatal(err)
+	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("a new export must be private: %v %v", info, err)
+	}
+	os.Chmod(file, 0o640)
+	must(t, c.ok("export", "--to", file), "Exported to")
+	if info, _ := os.Stat(file); info.Mode().Perm() != 0o640 {
+		t.Fatalf("export changed the file's mode to %v", info.Mode())
 	}
 	must(t, c.ok("export", "--auto", file), "kept up to date")
 	must(t, c.ok("export", "--auto", "off"), "Auto export is off")
@@ -232,13 +237,13 @@ func TestCLISuggest(t *testing.T) {
 	os.WriteFile(filepath.Join(bin, "grok"), []byte("#!/bin/sh\necho 'from grok'\n"), 0o755)
 	os.WriteFile(filepath.Join(bin, "gemini"), []byte("#!/bin/sh\necho oops >&2\nexit 3\n"), 0o755)
 	// An Omarchy stub that would install the agent on first run must never be run.
-	os.WriteFile(filepath.Join(bin, "opencode"), []byte("#!/bin/bash\nmise use -g --quiet \"opencode\" || exit 1\nexec mise x opencode -- opencode \"$@\"\n"), 0o755)
+	os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/bash\nmise use -g --quiet \"claude\" || exit 1\nexec mise x claude -- claude \"$@\"\n"), 0o755)
 	t.Setenv("PATH", bin+":/usr/bin:/bin")
 	write(t, c.s.ConfigDir, "hypr/bindings.conf", "x\n")
 	must(t, c.ok("suggest", "--agent", "codex", "hypr"), "Short line")
 	must(t, c.ok("suggest", "--agent", "grok"), "from grok")
 	c.fails("gemini failed", "suggest", "--agent", "gemini")
-	c.fails("not installed", "suggest", "--agent", "opencode")
+	c.fails("not supported", "suggest", "--agent", "opencode") // it only takes the prompt as an argument
 	c.fails("not installed", "suggest", "--agent", "claude")
 	c.fails("not supported", "suggest", "--agent", "pi")
 	c.fails("nothing to describe", "suggest", "--agent", "grok", "nope")

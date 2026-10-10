@@ -10,7 +10,7 @@ Item {
   property string binary: "syschange"
   // The CLI release this plugin is written for. The install button builds
   // exactly this tag, never an unpinned branch.
-  readonly property string cliVersion: "0.1.0"
+  readonly property string cliVersion: "0.1.1"
   property bool missing: false      // the CLI is not installed
   property string version: ""       // the installed CLI's version
   readonly property bool outdated: version !== "" && newer(cliVersion, version)

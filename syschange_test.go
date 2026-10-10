@@ -212,6 +212,9 @@ func TestAgentsInstallRemove(t *testing.T) {
 	os.MkdirAll(filepath.Join(home, ".gemini"), 0o755)
 	os.MkdirAll(filepath.Join(home, ".grok"), 0o755)
 	g := &Agents{Home: home, Exe: "/opt/my bin/syschange"}
+	legacy := filepath.Join(home, ".agents/skills/syschange") // where v0.1.0 linked the skill
+	os.MkdirAll(filepath.Dir(legacy), 0o755)
+	os.Symlink(g.skillPath(), legacy)
 
 	for range 2 { // installing twice changes nothing
 		done, err := g.Install()
@@ -229,7 +232,10 @@ func TestAgentsInstallRemove(t *testing.T) {
 		!strings.Contains(string(settings), `"[ -x '/opt/my bin/syschange' ] && '/opt/my bin/syschange' hook claude || true"`) || !strings.Contains(string(settings), `"other"`) {
 		t.Fatalf("settings.json:\n%s", settings)
 	}
-	for _, p := range []string{".agents/skills/syschange/SKILL.md", ".grok/skills/syschange/SKILL.md"} {
+	if _, err := os.Lstat(legacy); err == nil {
+		t.Fatal("the shared ~/.agents/skills link must go")
+	}
+	for _, p := range []string{".codex/skills/syschange/SKILL.md", ".gemini/skills/syschange/SKILL.md", ".grok/skills/syschange/SKILL.md"} {
 		if _, err := os.Stat(filepath.Join(home, p)); err != nil {
 			t.Fatalf("skill not linked: %s", p)
 		}

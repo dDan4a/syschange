@@ -115,7 +115,7 @@ changes are left alone. Run `syschange init` again to restore the hooks if you d
 ### Describe with AI
 
 `syschange suggest` runs Omarchy's default agent (`omarchy default agent`) once, without tools, on the diff of the
-pending changes and prints one line. Supported: Claude Code (Haiku), Codex, Gemini CLI, Grok, OpenCode; pick
+pending changes and prints one line. Supported: Claude Code (Haiku), Codex, Gemini CLI, Grok; pick
 another with `--agent`. The diff goes to that agent's provider; files that look like secrets are never in it.
 
 ### Let agents record what they change
@@ -127,8 +127,8 @@ syschange agents install          # all installed agents; or name some: syschang
 | Agent | Skill | Hooks |
 |---|---|---|
 | Claude Code | `~/.claude/skills` | `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` in `~/.claude/settings.json` |
-| Codex | `~/.agents/skills`, `~/.codex/skills` | the same four in `~/.codex/hooks.json` |
-| Gemini CLI | `~/.agents/skills` | `SessionStart`, `BeforeTool`, `AfterTool`, `AfterAgent` in `~/.gemini/settings.json` |
+| Codex | `~/.codex/skills` | the same four in `~/.codex/hooks.json` |
+| Gemini CLI | `~/.gemini/skills` | `SessionStart`, `BeforeTool`, `AfterTool`, `AfterAgent` in `~/.gemini/settings.json` |
 | Grok | `~/.grok/skills` | the same four as Claude, in its own file `~/.grok/hooks/syschange.json` |
 
 The **Connect** button in the panel names Omarchy's default agent (`omarchy default agent`) and connects it first;

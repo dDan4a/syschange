@@ -111,11 +111,8 @@ func runAgent(ctx context.Context, agent, prompt string) (string, error) {
 		f.Close()
 		args = []string{"grok", "--prompt-file", f.Name(), "--max-turns", "1"}
 		stdin = ""
-	case "opencode":
-		args = []string{"opencode", "run", prompt} // no confirmed stdin mode
-		stdin = ""
 	default:
-		return "", fmt.Errorf("describing with %q is not supported; use claude, codex, gemini, grok or opencode (syschange suggest --agent NAME)", agent)
+		return "", fmt.Errorf("describing with %q is not supported; use claude, codex, gemini or grok (syschange suggest --agent NAME)", agent)
 	}
 	if path, err := exec.LookPath(args[0]); err != nil || lazyInstaller(path) {
 		return "", fmt.Errorf("%s is not installed", args[0])

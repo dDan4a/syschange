@@ -220,7 +220,12 @@ func (s *Store) ExportTo(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return writeAtomic(path, b.Bytes(), 0o644)
+	// The history is private: keep the file's own mode, and start new ones private.
+	perm := os.FileMode(0o600)
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	}
+	return writeAtomic(path, b.Bytes(), perm)
 }
 
 // SetAutoExport keeps a Markdown file in sync with the history: it is

@@ -81,6 +81,14 @@ Panel {
   }
   function revert(change) { confirm("revert:" + change.id, function() { root.source.revert(change.id) }) }
   function ignoreGroup(group) { confirm("ignore:" + group.key, function() { root.source.ignore(group.key + "/") }) }
+  function toggleDiff(group) {
+    if (!root.source) return
+    root.source.showDiff(root.source.diffKey === group.key ? "" : group.key)
+  }
+  function diffColor(kind) {
+    return kind === "add" ? Color.accent : kind === "del" ? Color.urgent : kind === "file" ? root.foreground : root.dim
+  }
+
   function restoreCheckpoint(cp) { confirm("restore:" + cp.commit, function() { root.source.restore(cp.commit) }) }
   function undoEntry(entry) { confirm("undo:" + entry.time, function() { root.source.undo(entry.time) }) }
 
@@ -145,6 +153,7 @@ Panel {
         else if (key === "d") root.describe(g)
         else if (key === "s") root.source.skip(g.key)
         else if (key === "v") root.source.openDiff(g.key)
+        else if (key === "o") root.toggleDiff(g)
         else if (key === "a") root.suggest(g)
       }
 
@@ -251,6 +260,10 @@ Panel {
               Item {
                 width: parent.width
                 height: Math.max(titleText.implicitHeight, actions.implicitHeight)
+                TapHandler {
+                  enabled: groupItem.modelData.key !== "packages" && groupItem.modelData.key !== "services"
+                  onTapped: { root.selected = groupItem.index; root.toggleDiff(groupItem.modelData) }
+                }
                 Text {
                   id: titleText
                   anchors.verticalCenter: parent.verticalCenter
@@ -356,6 +369,43 @@ Panel {
                     foreground: changeItem.armed ? Color.urgent : root.dim
                     onClicked: root.revert(changeItem.modelData)
                   }
+                }
+              }
+
+              // Inline diff (o, or click the title). Long diffs: v opens a terminal.
+              Column {
+                readonly property bool shown: root.source !== null && root.source.diffKey === groupItem.modelData.key
+                visible: shown
+                width: parent.width
+                topPadding: Style.space(4)
+                spacing: 0
+                Text {
+                  visible: parent.shown && root.source.diffLines.length === 0
+                  text: "Loading diff…"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                Repeater {
+                  model: parent.shown ? root.source.diffLines.slice(0, 40) : []
+                  delegate: Text {
+                    required property var modelData
+                    width: groupColumn.width
+                    text: modelData.text
+                    color: root.diffColor(modelData.kind)
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    font.bold: modelData.kind === "file"
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                  }
+                }
+                Text {
+                  visible: parent.shown && root.source.diffLines.length > 40
+                  text: "… " + (root.source ? root.source.diffLines.length - 40 : 0) + " more lines, press v for the full diff"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
                 }
               }
             }
@@ -559,7 +609,7 @@ Panel {
 
         Text {
           width: parent.width
-          text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · s keep · v diff · c checkpoint · r refresh"
+          text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · s keep · o/v diff · c checkpoint · r refresh"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

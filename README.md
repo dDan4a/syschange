@@ -78,7 +78,7 @@ An ID is a file inside `~/.config` (`hypr/bindings.lua`), an app directory (`hyp
 or a group (`packages`, `services`). No ID means everything.
 
 In the bar panel: `↑↓` select, `Enter` describe, `a` describe with AI, `s` keep without a description,
-`v` diff, `c` checkpoint, `r` refresh.
+`o` (or a click on the app) shows the diff right in the panel, `v` opens it in a terminal, `c` checkpoint, `r` refresh.
 Each line can be undone or ignored; each history entry can be undone. Undo and "stop tracking an app"
 ask for a second click.
 

@@ -395,9 +395,11 @@ func (s *Store) Diff(w io.Writer, items []string, color bool) error {
 			fmt.Fprintf(w, "%s %s %s\n", sign, c.Kind, c.Label)
 			continue
 		case c.Op == "added":
-			cmd = exec.Command("git", "diff", "--no-index", colorFlag, "--", "/dev/null", filepath.Join(s.ConfigDir, c.Name))
+			cmd = exec.Command("git", "diff", "--no-index", "--src-prefix=a/", "--dst-prefix=b/", colorFlag, "--", "/dev/null", c.Name)
+			cmd.Dir = s.ConfigDir
 		default:
-			out, err := s.git(nil, "diff", colorFlag, "HEAD", "--", c.Name)
+			// Fixed prefixes: the user's diff.mnemonicPrefix or noprefix must not change the output.
+			out, err := s.git(nil, "diff", "--src-prefix=a/", "--dst-prefix=b/", colorFlag, "HEAD", "--", c.Name)
 			if err != nil {
 				return err
 			}

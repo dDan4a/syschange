@@ -19,6 +19,9 @@ Item {
   property string error: ""
   property string notice: ""        // commands to run as root after an undo or restore
   property var checkpoints: []
+  property string diffKey: ""       // group whose diff is shown inline
+  property var diffLines: []        // [{kind: "add"|"del"|"hunk"|"file"|"ctx", text}]
+  property string lastStatus: ""
   property bool busy: actionProcess.running
   property string suggestingKey: ""  // group an AI description is being written for
 
@@ -55,6 +58,42 @@ Item {
     suggestProcess.running = true
   }
 
+  function showDiff(key) {
+    diffKey = key
+    diffLines = []
+    if (key === "") return
+    diffProcess.running = false
+    diffProcess.command = [binary, "diff", key]
+    diffProcess.running = true
+  }
+
+  // Unified diff -> short, typed lines for the panel.
+  function parseDiff(text) {
+    var out = []
+    var firstHunk = true
+    var lines = String(text || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i]
+      if (l.indexOf("diff --git ") === 0) {
+        var m = / b\/(.*)$/.exec(l)
+        out.push({ kind: "file", text: m ? m[1] : l })
+        firstHunk = true
+      } else if (/^(index |--- |\+\+\+ |new file|deleted file|old mode|new mode|similarity)/.test(l)) {
+        continue
+      } else if (l.indexOf("@@") === 0) {
+        if (!firstHunk) out.push({ kind: "hunk", text: "⋯" }) // a gap between hunks of one file
+        firstHunk = false
+      } else if (l[0] === "+") {
+        out.push({ kind: "add", text: l })
+      } else if (l[0] === "-") {
+        out.push({ kind: "del", text: l })
+      } else if (l !== "") {
+        out.push({ kind: "ctx", text: l })
+      }
+    }
+    return out
+  }
+
   function openDiff(key) {
     Quickshell.execDetached(["setsid", "uwsm-app", "--", "xdg-terminal-exec", "--app-id=org.omarchy.terminal",
       "--title=System changes", "-e", "sh", "-c", '"$0" diff --color "$1" | less -R', binary, key])
@@ -88,6 +127,8 @@ Item {
     onExited: function(exitCode) {
       if (exitCode !== 0) { root.failure(statusErr.text || statusOut.text); return }
       try {
+        var changed = statusOut.text !== root.lastStatus
+        root.lastStatus = statusOut.text
         var s = JSON.parse(statusOut.text)
         root.initialized = s.initialized
         root.pending = s.pending || []
@@ -95,10 +136,23 @@ Item {
         root.count = s.count || 0
         root.agents = s.agents || []
         root.checkpoints = s.checkpoints || []
+        // The shown diff follows the files: reload it when anything changed.
+        if (changed && root.diffKey !== "") {
+          var still = root.pending.some(function(g) { return g.key === root.diffKey })
+          root.showDiff(still ? root.diffKey : "")
+        }
         root.error = ""
       } catch (e) {
         root.failure("unexpected output from syschange status")
       }
+    }
+  }
+
+  Process {
+    id: diffProcess
+    stdout: StdioCollector { id: diffOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode === 0) root.diffLines = root.parseDiff(diffOut.text)
     }
   }
 

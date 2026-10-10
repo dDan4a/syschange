@@ -139,7 +139,8 @@ func TestRecordRevertIgnore(t *testing.T) {
 	if err := s.Export(&md); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"sudo pacman -S --needed voxtype", "added `voxtype/config.toml`", "Voice typing (by claude): Voxtype, Packages"} {
+	for _, want := range []string{"sudo pacman -S --needed voxtype", "- added `voxtype/config.toml`",
+		"Voice typing · _claude_\n", "  - Voxtype: config.toml (`voxtype/config.toml`), added\n", "  - Installed voxtype\n"} {
 		if !strings.Contains(md.String(), want) {
 			t.Errorf("export lacks %q:\n%s", want, md.String())
 		}
@@ -566,5 +567,29 @@ func TestAgentsInstallOnlyNamed(t *testing.T) {
 	}
 	if _, err := g.Install("cursor"); err == nil {
 		t.Fatal("unknown agent must fail")
+	}
+}
+
+func TestAutoExport(t *testing.T) {
+	s, _ := newTestStore(t)
+	out := filepath.Join(t.TempDir(), "notes", "System changes.md")
+	if err := s.SetAutoExport(filepath.Join(s.ConfigDir, "x.md")); err == nil {
+		t.Fatal("a file inside the tracked directory must be refused")
+	}
+	if err := s.SetAutoExport(out); err != nil {
+		t.Fatal(err)
+	}
+	write(t, s.ConfigDir, "hypr/bindings.conf", "x\n")
+	if _, err := s.Record(nil, "Keep it in sync", ""); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(out); !strings.Contains(string(b), "Keep it in sync") {
+		t.Fatalf("auto export not updated:\n%s", b)
+	}
+	s.SetAutoExport("")
+	write(t, s.ConfigDir, "hypr/bindings.conf", "y\n")
+	s.Record(nil, "After off", "")
+	if b, _ := os.ReadFile(out); strings.Contains(string(b), "After off") {
+		t.Fatal("auto export still on")
 	}
 }

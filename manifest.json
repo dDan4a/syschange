@@ -31,7 +31,8 @@
     "defaultSection": "right",
     "defaults": {
       "binary": "syschange",
-      "refreshIntervalSec": 30
+      "refreshIntervalSec": 30,
+      "exportPath": "~/Documents/System changes.md"
     },
     "schema": [
       {
@@ -49,6 +50,13 @@
         "max": 600,
         "step": 10,
         "defaultValue": 30
+      },
+      {
+        "key": "exportPath",
+        "type": "string",
+        "label": "Markdown export file",
+        "defaultValue": "~/Documents/System changes.md",
+        "description": "Where the export button writes the history. To keep a file updated after every change: syschange export --auto FILE."
       }
     ]
   },

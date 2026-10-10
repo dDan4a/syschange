@@ -37,6 +37,7 @@ BarWidget {
     if (!source) return
     source.binary = String(setting("binary", "syschange")).replace(/^~(?=\/)/, Quickshell.env("HOME"))
     source.intervalSec = Number(setting("refreshIntervalSec", 30))
+    source.exportPath = String(setting("exportPath", "~/Documents/System changes.md")).replace(/^~(?=\/)/, Quickshell.env("HOME"))
   }
 
   implicitWidth: button.implicitWidth

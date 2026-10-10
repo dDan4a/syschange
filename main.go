@@ -35,7 +35,8 @@ Usage:
   syschange checkpoints                list them
   syschange restore NAME               bring config files back to a checkpoint
   syschange undo ENTRY                 undo a recorded entry (its commit, or time from status --json)
-  syschange export                     history and setup steps as Markdown
+  syschange export [--to FILE]         history and setup steps as Markdown
+  syschange export --auto FILE|off     keep FILE updated after every record
   syschange agents [install [NAME...]|remove]
                                        connect Claude Code, Codex, Gemini CLI, Grok: skill + hooks
   syschange hook AGENT [start]         the hooks themselves (read stdin)
@@ -64,6 +65,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	color := fs.Bool("color", false, "colored diff even when not writing to a terminal")
+	exportTo := fs.String("to", "", "export: write to this file instead of stdout")
+	autoExport := fs.String("auto", "", "export: keep this file updated after every record; off to stop")
 	agentName := fs.String("agent", "", "agent for suggest; default: Omarchy's default agent")
 	by := fs.String("by", defaultAuthor(), "who made the change, for example an agent name")
 	if err := fs.Parse(args); err != nil {
@@ -148,6 +151,27 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	case "log":
 		return printLog(s, stdout)
 	case "export":
+		switch {
+		case *autoExport == "off":
+			if err := s.SetAutoExport(""); err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, "Auto export is off.")
+			return nil
+		case *autoExport != "":
+			if err := s.SetAutoExport(expandHome(*autoExport)); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "Exported to %s, and it will be kept up to date.\n", s.autoExportPath())
+			return nil
+		case *exportTo != "":
+			path := expandHome(*exportTo)
+			if err := s.ExportTo(path); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "Exported to %s.\n", path)
+			return nil
+		}
 		return s.Export(stdout)
 	case "undo":
 		if len(args) != 1 {
@@ -198,6 +222,13 @@ func defaultAuthor() string {
 	return ""
 }
 
+func expandHome(p string) string {
+	if home, err := os.UserHomeDir(); err == nil && (p == "~" || strings.HasPrefix(p, "~/")) {
+		return home + p[1:]
+	}
+	return p
+}
+
 func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
@@ -211,6 +242,7 @@ type statusJSON struct {
 	ConfigDir   string       `json:"configDir"`
 	Agents      []AgentState `json:"agents"`
 	Checkpoints []Checkpoint `json:"checkpoints"`
+	AutoExport  string       `json:"autoExport"` // file kept in sync, if any
 }
 
 func status(s *Store, w io.Writer, asJSON bool) error {
@@ -233,6 +265,7 @@ func status(s *Store, w io.Writer, asJSON bool) error {
 			return err
 		}
 		out.History = history[:min(len(history), 50)]
+		out.AutoExport = s.autoExportPath()
 		checkpoints, err := s.Checkpoints()
 		if err != nil {
 			return err

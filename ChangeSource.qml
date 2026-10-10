@@ -9,6 +9,8 @@ Item {
 
   property string binary: "syschange"
   property int intervalSec: 30
+  property string exportPath: ""
+  property string autoExport: ""    // file the CLI keeps in sync, if any
 
   property bool initialized: true
   property var pending: []      // groups: {key, title, changes: [...]}
@@ -48,6 +50,16 @@ Item {
   function revert(id) { act(["revert", id]) }
   function ignore(path) { act(["ignore", path]) }
   function undo(entryTime) { act(["undo", entryTime]) }
+  // Exports to the file kept in sync if there is one, else to the configured
+  // path, then opens it.
+  function exportMarkdown() {
+    var path = autoExport || exportPath
+    if (path === "" || exportProcess.running) return
+    exportProcess.path = path
+    exportProcess.command = [binary, "export", "--to", path]
+    exportProcess.running = true
+  }
+
   function checkpoint(name) { act(["checkpoint", name]) }
   function restore(commit) { act(["restore", commit]) }
 
@@ -136,6 +148,7 @@ Item {
         root.count = s.count || 0
         root.agents = s.agents || []
         root.checkpoints = s.checkpoints || []
+        root.autoExport = s.autoExport || ""
         // The shown diff follows the files: reload it when anything changed.
         if (changed && root.diffKey !== "") {
           var still = root.pending.some(function(g) { return g.key === root.diffKey })
@@ -145,6 +158,17 @@ Item {
       } catch (e) {
         root.failure("unexpected output from syschange status")
       }
+    }
+  }
+
+  Process {
+    id: exportProcess
+    property string path: ""
+    stderr: StdioCollector { id: exportErr; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) { root.failure(exportErr.text); return }
+      root.notice = "Exported to " + path
+      Qt.openUrlExternally("file://" + path)
     }
   }
 

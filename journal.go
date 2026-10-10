@@ -72,7 +72,16 @@ func (s *Store) record(items []string, note, by, undoes string) (Entry, error) {
 			return Entry{}, err
 		}
 	}
-	return entry, s.appendJournal(entry)
+	if err := s.appendJournal(entry); err != nil {
+		return entry, err
+	}
+	// The change is recorded either way; a failed export only warns.
+	if path := s.autoExportPath(); path != "" {
+		if err := s.ExportTo(path); err != nil {
+			fmt.Fprintln(os.Stderr, "syschange: auto export:", err)
+		}
+	}
+	return entry, nil
 }
 
 func (s *Store) acceptItems(file, kind string, chosen []Change) error {
@@ -412,95 +421,10 @@ func (s *Store) Diff(w io.Writer, items []string, color bool) error {
 	return nil
 }
 
-// Export writes Markdown: what to repeat on a new machine, then the history.
-func (s *Store) Export(w io.Writer) error {
-	if !s.Initialized() {
-		return ErrNotInitialized
-	}
-	history, err := s.History()
-	if err != nil {
-		return err
-	}
-	fmt.Fprintln(w, "# System changes")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "## Repeat on a new machine")
-	fmt.Fprintln(w)
-	for _, kind := range []struct{ name, file string }{{"package", "packages"}, {"unit", "units"}} {
-		base, err := readLines(s.path(kind.file + ".init.txt"))
-		if err != nil {
-			return err
-		}
-		now, err := readLines(s.path(kind.file + ".txt"))
-		if err != nil {
-			return err
-		}
-		for _, c := range setChanges(kind.name, base, now) {
-			fmt.Fprintf(w, "- `%s`\n", redo(c))
-		}
-	}
-	files, err := s.git(nil, "diff", "--name-status", "--no-renames", rootCommitRange(s))
-	if err != nil {
-		return err
-	}
-	if lines := strings.TrimSpace(string(files)); lines != "" {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Config files changed (in `~/.config`):")
-		fmt.Fprintln(w)
-		for _, line := range strings.Split(lines, "\n") {
-			status, path, _ := strings.Cut(line, "\t")
-			fmt.Fprintf(w, "- %s `%s`\n", map[string]string{"A": "added", "M": "changed", "D": "removed"}[status], path)
-		}
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "## History")
-	day := ""
-	for _, e := range history {
-		if d := e.Time.Format("2006-01-02"); d != day {
-			day = d
-			fmt.Fprintf(w, "\n### %s\n\n", d)
-		}
-		note := e.Note
-		if note == "" {
-			note = "_no description_"
-		}
-		if e.By != "" {
-			note += " (by " + e.By + ")"
-		}
-		fmt.Fprintf(w, "- %s %s: %s\n", e.Time.Format("15:04"), note, groupTitles(e.Changes))
-	}
-	return nil
-}
-
 func groupTitles(changes []Change) string {
 	var titles []string
 	for _, g := range Groups(changes) {
 		titles = append(titles, g.Title)
 	}
 	return strings.Join(titles, ", ")
-}
-
-func rootCommitRange(s *Store) string {
-	out, err := s.git(nil, "rev-list", "--max-parents=0", "HEAD")
-	if err != nil {
-		return "HEAD"
-	}
-	return strings.Fields(string(out))[0] + "..HEAD"
-}
-
-func redo(c Change) string {
-	if c.Kind == "package" {
-		if c.Op == "added" {
-			return "sudo pacman -S --needed " + c.Name
-		}
-		return "sudo pacman -Rns " + c.Name
-	}
-	scope, unit, _ := strings.Cut(c.Name, " ")
-	verb := "enable"
-	if c.Op == "removed" {
-		verb = "disable"
-	}
-	if scope == "user" {
-		return "systemctl --user " + verb + " " + unit
-	}
-	return "sudo systemctl " + verb + " " + unit
 }

@@ -22,7 +22,9 @@ diff and undo it.
   proposes the line, in your system language. You edit or accept it.
 - **You see which AI agent changed what**, even if it never says so. One click gives Claude Code, Codex,
   Gemini CLI and Grok a skill and hooks; an agent that changed your system records why before it finishes.
-- **Export** to Markdown: the steps to repeat your setup on a new machine, plus the history.
+- **Markdown export**: the history with every change, what is not recorded yet, and the commands to repeat
+  your setup on a new machine. One click in the panel, or keep a file (in Obsidian, your dotfiles…) updated
+  after every change with `syschange export --auto FILE`.
 - **Omarchy bar widget**: new changes, history, describe, diff, undo.
 
 Browser and Electron profiles, caches, databases, binaries and anything that looks like a password,
@@ -71,14 +73,16 @@ Recorded 2 change(s).
 | `syschange checkpoint [NAME]` | save the whole setup now |
 | `syschange checkpoints` | list checkpoints |
 | `syschange restore NAME` | bring config files back to a checkpoint; prints the `sudo` commands for packages and services |
-| `syschange export` | Markdown: setup steps and history |
+| `syschange export [--to FILE]` | Markdown: history and setup steps |
+| `syschange export --auto FILE\|off` | keep FILE updated after every record |
 | `syschange agents [install\|remove]` | connect Claude Code and Codex |
 
 An ID is a file inside `~/.config` (`hypr/bindings.lua`), an app directory (`hypr`), a package or unit name,
 or a group (`packages`, `services`). No ID means everything.
 
 In the bar panel: `↑↓` select, `Enter` describe, `a` describe with AI, `s` keep without a description,
-`o` (or a click on the app) shows the diff right in the panel, `v` opens it in a terminal, `c` checkpoint, `r` refresh.
+`o` (or a click on the app) shows the diff right in the panel, `v` opens it in a terminal, `c` checkpoint,
+`m` export to Markdown and open it, `r` refresh.
 Each line can be undone or ignored; each history entry can be undone. Undo and "stop tracking an app"
 ask for a second click.
 

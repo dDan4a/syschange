@@ -167,6 +167,7 @@ Panel {
         var key = text.toLowerCase(), g = root.current()
         if (key === "r") root.source.refresh()
         else if (key === "c") root.newCheckpoint()
+        else if (key === "m") root.source.exportMarkdown()
         else if (!g) return
         else if (key === "d") root.describe(g)
         else if (key === "s") root.source.skip(g.key)
@@ -449,11 +450,27 @@ Panel {
 
         PanelSeparator { width: parent.width; visible: root.history.length > 0 }
 
-        PanelSectionHeader {
+        Item {
           visible: root.history.length > 0
-          text: "History"
-          foreground: root.foreground
-          fontFamily: root.fontFamily
+          width: parent.width
+          height: Math.max(historyHeader.implicitHeight, exportButton.implicitHeight)
+          PanelSectionHeader {
+            id: historyHeader
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: "History" + (root.source && root.source.autoExport ? "  ·  kept in " + root.source.autoExport.replace(/^.*\//, "") : "")
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+          PanelActionButton {
+            id: exportButton
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "󰍔" // nf-md-language_markdown
+            tooltipText: "Export to Markdown and open it (m). Keep a file updated: syschange export --auto FILE"
+            foreground: root.foreground
+            onClicked: root.source.exportMarkdown()
+          }
         }
 
         Text {

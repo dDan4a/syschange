@@ -37,6 +37,7 @@ Item {
   function skip(key) { act(["skip", key]) }
   function revert(id) { act(["revert", id]) }
   function ignore(path) { act(["ignore", path]) }
+  function undo(entryTime) { act(["undo", entryTime]) }
 
   function openDiff(key) {
     Quickshell.execDetached(["setsid", "uwsm-app", "--", "xdg-terminal-exec", "--app-id=org.omarchy.terminal",

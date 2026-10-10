@@ -12,6 +12,10 @@ diff and undo it.
 - **Packages** you installed explicitly (`pacman`, AUR included) and **systemd services** you enabled,
   system and user.
 - **Human names**: "Hyprland: Key bindings" instead of `hypr/bindings.lua`.
+- **Undo anything**: a change not recorded yet, or a recorded one later on. Undo takes back only that
+  entry's lines, so later edits to the same file survive.
+- **Quiet on Omarchy**: an `omarchy update`, a theme or a font switch is recorded by itself as one entry
+  ("Theme: tokyo-night"), not dumped on you as dozens of changed files.
 - **AI agents describe their own changes.** One click gives Claude Code, Codex, Gemini CLI and Grok a skill
   and hooks. When an agent changed your system during a session, it records why before it finishes.
 - **Export** to Markdown: the steps to repeat your setup on a new machine, plus the history.
@@ -58,6 +62,7 @@ Recorded 2 change(s).
 | `syschange revert ID...` | undo config changes; prints the `sudo` command for packages and services |
 | `syschange ignore PATH` | never track this path |
 | `syschange log` | the history |
+| `syschange undo ENTRY` | undo a recorded entry (commit from `log`, or its time) |
 | `syschange export` | Markdown: setup steps and history |
 | `syschange agents [install\|remove]` | connect Claude Code and Codex |
 
@@ -65,7 +70,15 @@ An ID is a file inside `~/.config` (`hypr/bindings.lua`), an app directory (`hyp
 or a group (`packages`, `services`). No ID means everything.
 
 In the bar panel: `↑↓` select, `Enter` describe, `s` keep without a description, `v` diff, `r` refresh.
-The undo button on each line asks for a second click.
+Each line can be undone or ignored; each history entry can be undone. Undo and "stop tracking an app"
+ask for a second click.
+
+## Omarchy
+
+On Omarchy, `syschange init` adds `syschange.hook` to `~/.config/omarchy/hooks/{post-update,theme-set,font-set}.d/`.
+When Omarchy updates itself or switches a theme or font, the hook records what that command changed
+(files modified and packages installed since it started) as one entry by `omarchy`. Your own pending
+changes are left alone. Run `syschange init` again to restore the hooks if you deleted them.
 
 ## AI agents
 
@@ -108,6 +121,16 @@ The state directory is `0700`. Nothing leaves your machine.
 - Directories that are git repositories of their own (for example plugins cloned into `~/.config`) are
   not tracked file by file.
 - Files over 256 KB are skipped.
+
+## Remove
+
+```bash
+syschange agents remove                         # if you connected agents
+omarchy plugin remove dan4a.syschange           # the bar widget
+rm ~/.config/omarchy/hooks/*.d/syschange.hook   # the Omarchy hooks
+rm -rf ~/.local/state/syschange                 # the history
+rm "$(command -v syschange)"                    # the CLI
+```
 
 ## License
 

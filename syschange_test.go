@@ -300,3 +300,127 @@ func TestStopHookGrokAndGemini(t *testing.T) {
 		t.Fatalf("gemini: %s", out)
 	}
 }
+
+func TestUndoRecordedEntry(t *testing.T) {
+	s, _ := newTestStore(t)
+	bindings := filepath.Join(s.ConfigDir, "hypr/bindings.conf")
+	write(t, s.ConfigDir, "hypr/bindings.conf", "bind = SUPER, Q, killactive\nbind = SUPER, R, exec, voxtype\n")
+	write(t, s.ConfigDir, "voxtype/config.toml", "model = \"base\"\n")
+	e, err := s.Record(nil, "Voice typing", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An unrelated later edit in the same file survives the undo.
+	write(t, s.ConfigDir, "hypr/bindings.conf", "# mine\nbind = SUPER, Q, killactive\nbind = SUPER, R, exec, voxtype\n")
+	if _, err := s.Record(nil, "Comment", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	undo, hint, err := s.Undo(e.ID(), "")
+	if err != nil || hint != "" {
+		t.Fatalf("undo: %v %q", err, hint)
+	}
+	if b, _ := os.ReadFile(bindings); string(b) != "# mine\nbind = SUPER, Q, killactive\n" {
+		t.Fatalf("bindings after undo: %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(s.ConfigDir, "voxtype/config.toml")); err == nil {
+		t.Fatal("file added by the entry was not removed")
+	}
+	if undo.Note != "Undo: Voice typing" || undo.Undoes != e.ID() {
+		t.Fatalf("undo entry %+v", undo)
+	}
+	history, _ := s.History()
+	if !history[2].Undone || history[0].Undone {
+		t.Fatalf("undone flags: %+v", history)
+	}
+	if _, _, err := s.Undo(e.ID(), ""); err == nil {
+		t.Fatal("undoing twice must fail")
+	}
+	if p, _ := s.Pending(); len(p) != 0 {
+		t.Fatalf("undo left pending changes: %v", ids(p))
+	}
+
+	// A conflicting later edit makes undo refuse instead of overwriting it.
+	write(t, s.ConfigDir, "git/config", "[user]\nname = other\n")
+	e2, _ := s.Record(nil, "Rename", "")
+	write(t, s.ConfigDir, "git/config", "[user]\nname = third\n")
+	s.Record(nil, "Rename again", "")
+	if _, _, err := s.Undo(e2.Commit, ""); err == nil {
+		t.Fatal("conflicting undo must fail")
+	}
+	if b, _ := os.ReadFile(filepath.Join(s.ConfigDir, "git/config")); string(b) != "[user]\nname = third\n" {
+		t.Fatalf("failed undo touched the file: %q", b)
+	}
+}
+
+func TestOmarchyHooks(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config")
+	write(t, cfg, "omarchy/hooks/theme-set.d/other.hook", "echo hi\n")
+	write(t, cfg, "btop/btop.conf", "theme = a\n")
+	write(t, cfg, "hypr/input.conf", "kb = us\n")
+	s := &Store{ConfigDir: cfg, StateDir: filepath.Join(dir, "state"),
+		ListPackages: func() ([]string, error) { return nil, nil },
+		ListUnits:    func() ([]string, error) { return nil, nil }}
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := s.git(nil, "ls-files", "omarchy/hooks")
+	if !strings.Contains(string(out), "theme-set.d/syschange.hook") || !strings.Contains(string(out), "post-update.d/syschange.hook") {
+		t.Fatalf("hooks not installed at init: %s", out)
+	}
+	if p, _ := s.Pending(); len(p) != 0 {
+		t.Fatalf("pending after init: %v", ids(p))
+	}
+
+	// The user edited input an hour ago; a theme switch just rewrote btop.
+	write(t, cfg, "hypr/input.conf", "kb = us,ru\n")
+	past := time.Now().Add(-time.Hour)
+	os.Chtimes(filepath.Join(cfg, "hypr/input.conf"), past, past)
+	write(t, cfg, "btop/btop.conf", "theme = b\n")
+	if err := s.OmarchyHook("theme-set", []string{"tokyo-night"}); err != nil {
+		t.Fatal(err)
+	}
+	history, _ := s.History()
+	if len(history) != 1 || history[0].Note != "Theme: tokyo-night" || history[0].By != "omarchy" || ids(history[0].Changes)[0] != "modified btop/btop.conf" {
+		t.Fatalf("history %+v", history)
+	}
+	if p, _ := s.Pending(); !slices.Equal(ids(p), []string{"modified hypr/input.conf"}) {
+		t.Fatalf("the user's change must stay pending: %v", ids(p))
+	}
+
+	// Running init again on an existing setup restores a deleted hook and records it.
+	os.Remove(s.omarchyHookPath("font-set"))
+	s.Record([]string{"omarchy"}, "", "")
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if history, _ = s.History(); history[0].By != "syschange" {
+		t.Fatalf("hook reinstall not recorded: %+v", history[0])
+	}
+}
+
+func TestUndoSymlink(t *testing.T) {
+	s, _ := newTestStore(t)
+	link := filepath.Join(s.ConfigDir, "omarchy/plugins/mine")
+	os.MkdirAll(filepath.Dir(link), 0o755)
+	os.Symlink(t.TempDir(), link)
+	e, err := s.Record(nil, "Plugin", "")
+	if err != nil || len(e.Changes) != 1 {
+		t.Fatalf("%+v %v", e, err)
+	}
+	if _, _, err := s.Undo(e.Commit, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(link); err == nil {
+		t.Fatal("added symlink not removed")
+	}
+	// Undo the undo: the link comes back as a link.
+	history, _ := s.History()
+	if _, _, err := s.Undo(history[0].ID(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if !isLink(link) {
+		t.Fatal("symlink not restored")
+	}
+}

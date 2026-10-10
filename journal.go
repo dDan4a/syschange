@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,12 +21,18 @@ type Entry struct {
 	Note    string    `json:"note,omitempty"` // empty when the user skipped describing it
 	By      string    `json:"by,omitempty"`   // who recorded it: an agent name, empty for the user
 	Commit  string    `json:"commit,omitempty"`
-	Title   string    `json:"title"` // the apps it touched: "Hyprland, Packages"
+	Title   string    `json:"title"`            // the apps it touched: "Hyprland, Packages"
+	Undoes  string    `json:"undoes,omitempty"` // ID of the entry this one undid
+	Undone  bool      `json:"undone,omitempty"` // computed: a later entry undid this one
 	Changes []Change  `json:"changes"`
 }
 
 // Record accepts the selected pending changes into the history.
 func (s *Store) Record(items []string, note, by string) (Entry, error) {
+	return s.record(items, note, by, "")
+}
+
+func (s *Store) record(items []string, note, by, undoes string) (Entry, error) {
 	pending, err := s.Pending()
 	if err != nil {
 		return Entry{}, err
@@ -34,7 +41,7 @@ func (s *Store) Record(items []string, note, by string) (Entry, error) {
 	if len(chosen) == 0 {
 		return Entry{}, errors.New("nothing to record: no pending change matches")
 	}
-	entry := Entry{Time: time.Now(), Note: strings.TrimSpace(note), By: by, Title: groupTitles(chosen), Changes: chosen}
+	entry := Entry{Time: time.Now(), Note: strings.TrimSpace(note), By: by, Title: groupTitles(chosen), Undoes: undoes, Changes: chosen}
 
 	var paths []string
 	for _, c := range chosen {
@@ -118,8 +125,175 @@ func (s *Store) History() ([]Entry, error) {
 		}
 		entries = append(entries, e)
 	}
+	undone := map[string]bool{}
+	for _, e := range entries {
+		if e.Undoes != "" {
+			undone[e.Undoes] = true
+		}
+	}
+	for i := range entries {
+		entries[i].Undone = undone[entries[i].ID()]
+	}
 	slices.Reverse(entries)
 	return entries, sc.Err()
+}
+
+// ID identifies an entry: its time, which is unique in practice and also what
+// the JSON shows.
+func (e Entry) ID() string { return e.Time.Format(time.RFC3339Nano) }
+
+// Undo reverses a recorded entry: its config changes are taken back out of the
+// files and the result is recorded as a new entry. Later edits to the same
+// lines make it fail rather than overwrite them. Packages and services need
+// root, so their commands come back as hint.
+func (s *Store) Undo(id, by string) (Entry, string, error) {
+	history, err := s.History()
+	if err != nil {
+		return Entry{}, "", err
+	}
+	var target *Entry
+	for i, e := range history {
+		if e.ID() == id || (e.Commit != "" && len(id) >= 4 && strings.HasPrefix(e.Commit, id)) {
+			target = &history[i]
+			break
+		}
+	}
+	if target == nil {
+		return Entry{}, "", fmt.Errorf("no history entry %q", id)
+	}
+	if target.Undone {
+		return Entry{}, "", errors.New("this entry is already undone")
+	}
+	var manual []string
+	for _, c := range target.Changes {
+		if c.Kind != "config" {
+			manual = append(manual, undoCommand(c))
+		}
+	}
+	hint := ""
+	if len(manual) > 0 {
+		hint = "Run these yourself, they need root:\n  " + strings.Join(manual, "\n  ")
+	}
+	if target.Commit == "" {
+		return Entry{}, hint, nil
+	}
+	names, err := s.git(nil, "show", "--name-only", "-z", "--no-renames", "--format=", target.Commit)
+	if err != nil {
+		return Entry{}, "", err
+	}
+	paths := splitNul(names)
+	// Merge every file first and write only when all of them merge cleanly.
+	merged := map[string][]byte{} // nil means delete the file
+	links := map[string]bool{}    // restore as a symlink with this target
+	for _, path := range paths {
+		out, err := s.unmerge(target.Commit, path)
+		if err != nil {
+			return Entry{}, "", fmt.Errorf("%s changed again since, undo it by hand: %w", path, err)
+		}
+		merged[path] = out
+		if mode, _ := s.git(nil, "ls-tree", target.Commit+"^", "--", path); strings.HasPrefix(string(mode), "120000") {
+			links[path] = true
+		}
+	}
+	for path, body := range merged {
+		full := filepath.Join(s.ConfigDir, path)
+		if body == nil || links[path] {
+			if err := os.Remove(full); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return Entry{}, "", err
+			}
+		}
+		if body == nil {
+			continue
+		}
+		if links[path] {
+			if err := os.Symlink(string(body), full); err != nil {
+				return Entry{}, "", err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			return Entry{}, "", err
+		}
+		mode := os.FileMode(0o644)
+		if info, err := os.Stat(full); err == nil {
+			mode = info.Mode().Perm()
+		}
+		if err := os.WriteFile(full, body, mode); err != nil {
+			return Entry{}, "", err
+		}
+	}
+	note := target.Note
+	if note == "" {
+		note = target.Title
+	}
+	e, err := s.record(paths, "Undo: "+note, by, target.ID())
+	return e, hint, err
+}
+
+// readEntry reads a file, or a symlink's target, the way git stores them.
+func readEntry(path string) ([]byte, bool) {
+	if isLink(path) {
+		target, err := os.Readlink(path)
+		return []byte(target), err == nil
+	}
+	b, err := os.ReadFile(path)
+	return b, err == nil
+}
+
+func isLink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
+}
+
+// unmerge takes one file's change in commit back out of its current content
+// with a three-way merge, so later edits elsewhere in the file survive. It
+// returns the new content, or nil when the file should be removed.
+func (s *Store) unmerge(commit, path string) ([]byte, error) {
+	blob := func(rev string) ([]byte, bool) {
+		out, err := s.git(nil, "show", rev+":"+path)
+		return out, err == nil
+	}
+	after, existedAfter := blob(commit)
+	before, existedBefore := blob(commit + "^")
+	current, exists := readEntry(filepath.Join(s.ConfigDir, path))
+	switch {
+	case !existedBefore: // the entry created the file: remove it if untouched since
+		if exists && !bytes.Equal(current, after) {
+			return nil, errors.New("it was edited after it was created")
+		}
+		return nil, nil
+	case !existedAfter: // the entry deleted the file: bring it back if still gone
+		if exists {
+			return nil, errors.New("it exists again")
+		}
+		return before, nil
+	case !exists:
+		return nil, errors.New("it was deleted")
+	case isLink(filepath.Join(s.ConfigDir, path)):
+		if !bytes.Equal(current, after) {
+			return nil, errors.New("the link points elsewhere now")
+		}
+		return before, nil
+	}
+	tmp, err := os.MkdirTemp("", "syschange-undo-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	files := map[string][]byte{"current": current, "after": after, "before": before}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(tmp, name), body, 0o600); err != nil {
+			return nil, err
+		}
+	}
+	// Merge "before" into "current" over the common base "after": the entry's
+	// own lines go back to how they were, everything else stays.
+	cmd := exec.Command("git", "merge-file", "-p", "--quiet", filepath.Join(tmp, "current"), filepath.Join(tmp, "after"), filepath.Join(tmp, "before"))
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, errors.New("later edits touch the same lines")
+	}
+	return out, nil
 }
 
 // Revert puts the selected config files back to their last recorded state.

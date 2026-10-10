@@ -66,6 +66,7 @@ func (s *Store) git(stdin []byte, args ...string) ([]byte, error) {
 		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
 	}
 	cmd := exec.Command("git", append(base, args...)...)
+	cmd.Dir = s.ConfigDir // git apply resolves paths against the working directory
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
@@ -78,9 +79,19 @@ func (s *Store) git(stdin []byte, args ...string) ([]byte, error) {
 	return out, nil
 }
 
+// Init starts tracking. Run again, it only refreshes the Omarchy hooks.
 func (s *Store) Init() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
 	if s.Initialized() {
-		return errors.New("already initialized in " + s.StateDir)
+		created, err := s.installOmarchyHooks(exe)
+		if err != nil || len(created) == 0 {
+			return err
+		}
+		_, err = s.Record(created, "Record Omarchy updates, theme and font changes automatically", "syschange")
+		return err
 	}
 	if err := os.MkdirAll(s.StateDir, 0o700); err != nil {
 		return err
@@ -96,6 +107,9 @@ func (s *Store) Init() error {
 		return err
 	}
 	if err := s.autoExclude(); err != nil {
+		return err
+	}
+	if _, err := s.installOmarchyHooks(exe); err != nil {
 		return err
 	}
 	files, err := s.untracked()

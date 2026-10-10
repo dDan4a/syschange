@@ -19,7 +19,8 @@ import (
 const usage = `syschange keeps a history of changes to your system setup.
 
 Usage:
-  syschange init                       start tracking (~/.config, packages, services)
+  syschange init                       start tracking (~/.config, packages, services);
+                                       with Omarchy, its updates and theme changes record themselves
   syschange status [--json]            show changes not recorded yet
   syschange note [--by NAME] TEXT [ID...]
                                        record changes with a one-line reason
@@ -28,6 +29,7 @@ Usage:
   syschange revert ID...               undo config changes
   syschange ignore PATH                never track PATH (a gitignore pattern)
   syschange log                        show the history
+  syschange undo ENTRY                 undo a recorded entry (its commit, or time from status --json)
   syschange export                     history and setup steps as Markdown
   syschange agents [install|remove]     connect Claude Code, Codex, Gemini CLI, Grok: skill + hooks
   syschange hook AGENT [start]         the hooks themselves (read stdin)
@@ -104,7 +106,25 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return printLog(s, stdout)
 	case "export":
 		return s.Export(stdout)
+	case "undo":
+		if len(args) != 1 {
+			return errors.New("undo takes one history entry: its time (see status --json) or commit")
+		}
+		e, hint, err := s.Undo(args[0], *by)
+		if err != nil {
+			return err
+		}
+		if len(e.Changes) > 0 {
+			fmt.Fprintf(stdout, "Undid %d config change(s).\n", len(e.Changes))
+		}
+		if hint != "" {
+			fmt.Fprintln(stdout, hint)
+		}
+		return nil
 	case "hook":
+		if len(args) >= 2 && args[0] == "omarchy" {
+			return s.OmarchyHook(args[1], args[2:])
+		}
 		if len(args) == 0 || !slices.Contains([]string{"claude", "codex", "gemini", "grok"}, args[0]) {
 			return errors.New("usage: syschange hook claude|codex|gemini|grok [start]")
 		}
@@ -257,7 +277,10 @@ func printLog(s *Store, w io.Writer) error {
 		if e.By != "" {
 			note += "  [" + e.By + "]"
 		}
-		fmt.Fprintf(w, "%s  %s\n", e.Time.Format("2006-01-02 15:04"), note)
+		if e.Undone {
+			note += "  (undone)"
+		}
+		fmt.Fprintf(w, "%s  %s  %s\n", e.Time.Format("2006-01-02 15:04"), e.Commit, note)
 		for _, c := range e.Changes {
 			fmt.Fprintf(w, "    %s %s\n", opSign(c.Op), c.ID)
 		}

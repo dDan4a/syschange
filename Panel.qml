@@ -21,7 +21,7 @@ Panel {
   readonly property var history: source ? source.history : []
   property int selected: 0
   property string editingKey: ""   // group being described
-  property string armedRevert: ""  // change id waiting for a second click
+  property string armed: ""        // destructive action waiting for a second click: "revert:<id>", "ignore:<group>", "undo:<entry>"
 
   function open() { root.selected = 0; root.editingKey = ""; root.controller.show() }
   function close() { root.editingKey = ""; root.controller.hide() }
@@ -49,11 +49,15 @@ Panel {
     cancelDescribe()
   }
 
-  function revert(change) {
-    if (armedRevert !== change.id) { armedRevert = change.id; disarm.restart(); return }
-    armedRevert = ""
-    source.revert(change.id)
+  // Destructive actions take two clicks: the first arms, the second runs.
+  function confirm(key, action) {
+    if (armed !== key) { armed = key; disarm.restart(); return }
+    armed = ""
+    action()
   }
+  function revert(change) { confirm("revert:" + change.id, function() { root.source.revert(change.id) }) }
+  function ignoreGroup(group) { confirm("ignore:" + group.key, function() { root.source.ignore(group.key + "/") }) }
+  function undoEntry(entry) { confirm("undo:" + entry.time, function() { root.source.undo(entry.time) }) }
 
   function sign(op) { return op === "added" ? "+" : op === "removed" ? "−" : "~" }
   function opColor(op) { return op === "added" ? Color.accent : op === "removed" ? Color.urgent : root.foreground }
@@ -74,7 +78,7 @@ Panel {
   }
   onGroupsChanged: if (selected >= groups.length) selected = Math.max(0, groups.length - 1)
 
-  Timer { id: disarm; interval: 4000; onTriggered: root.armedRevert = "" }
+  Timer { id: disarm; interval: 4000; onTriggered: root.armed = "" }
 
   KeyboardPanel {
     id: panel
@@ -204,8 +208,8 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                   anchors.left: parent.left
                   anchors.right: actions.left
-                  text: groupItem.modelData.title
-                  color: root.foreground
+                  text: root.armed === "ignore:" + groupItem.modelData.key ? "Click again to stop tracking " + groupItem.modelData.title : groupItem.modelData.title
+                  color: root.armed === "ignore:" + groupItem.modelData.key ? Color.urgent : root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.subtitle
                   font.bold: true
@@ -235,6 +239,13 @@ Panel {
                     foreground: root.foreground
                     onClicked: root.source.openDiff(groupItem.modelData.key)
                   }
+                  PanelActionButton {
+                    visible: groupItem.modelData.key !== "packages" && groupItem.modelData.key !== "services"
+                    iconText: "󰈉" // nf-md-eye_off
+                    tooltipText: "Stop tracking " + groupItem.modelData.title
+                    foreground: root.armed === "ignore:" + groupItem.modelData.key ? Color.urgent : root.foreground
+                    onClicked: root.ignoreGroup(groupItem.modelData)
+                  }
                 }
               }
 
@@ -243,7 +254,7 @@ Panel {
                 delegate: Item {
                   id: changeItem
                   required property var modelData
-                  readonly property bool armed: root.armedRevert === modelData.id
+                  readonly property bool armed: root.armed === "revert:" + modelData.id
                   width: groupColumn.width
                   height: Math.max(changeText.implicitHeight, undo.implicitHeight)
 
@@ -261,13 +272,24 @@ Panel {
                     id: changeText
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: signText.right
-                    anchors.right: undo.left
+                    anchors.right: ignoreFile.left
                     text: changeItem.armed ? "Click again to undo: " + changeItem.modelData.label : root.changeText(changeItem.modelData)
                     color: changeItem.armed ? Color.urgent : root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
                     elide: Text.ElideMiddle
                     textFormat: Text.PlainText
+                  }
+                  PanelActionButton {
+                    id: ignoreFile
+                    anchors.right: undo.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: changeItem.modelData.kind === "config"
+                    width: visible ? implicitWidth : 0
+                    iconText: "󰈉" // nf-md-eye_off
+                    tooltipText: "Stop tracking this file"
+                    foreground: root.dim
+                    onClicked: root.source.ignore(changeItem.modelData.name)
                   }
                   PanelActionButton {
                     id: undo
@@ -329,30 +351,52 @@ Panel {
           model: root.history.slice(0, 30)
           boundsBehavior: Flickable.StopAtBounds
 
-          delegate: Column {
+          delegate: Item {
             id: entryItem
             required property var modelData
+            readonly property bool armed: root.armed === "undo:" + modelData.time
             width: ListView.view.width
-            spacing: Style.space(1)
+            height: entryColumn.implicitHeight
+            opacity: modelData.undone ? 0.5 : 1
 
-            Text {
-              width: parent.width
-              text: (entryItem.modelData.note || "No description") + (entryItem.modelData.by ? "  󰚩 " + entryItem.modelData.by : "")
-              color: entryItem.modelData.note ? root.foreground : root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              font.italic: !entryItem.modelData.note
-              elide: Text.ElideRight
-              textFormat: Text.PlainText
+            Column {
+              id: entryColumn
+              anchors.left: parent.left
+              anchors.right: undoEntryButton.left
+              anchors.rightMargin: Style.space(4)
+              spacing: Style.space(1)
+
+              Text {
+                width: parent.width
+                text: entryItem.armed ? "Click again to undo this"
+                  : (entryItem.modelData.note || "No description") + (entryItem.modelData.by ? "  󰚩 " + entryItem.modelData.by : "")
+                color: entryItem.armed ? Color.urgent : entryItem.modelData.note ? root.foreground : root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.italic: !entryItem.modelData.note
+                font.strikeout: entryItem.modelData.undone === true
+                elide: Text.ElideRight
+                textFormat: Text.PlainText
+              }
+              Text {
+                width: parent.width
+                text: root.ago(entryItem.modelData.time) + " · " + entryItem.modelData.title + (entryItem.modelData.undone ? " · undone" : "")
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+                textFormat: Text.PlainText
+              }
             }
-            Text {
-              width: parent.width
-              text: root.ago(entryItem.modelData.time) + " · " + entryItem.modelData.title
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideRight
-              textFormat: Text.PlainText
+            PanelActionButton {
+              id: undoEntryButton
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              visible: !entryItem.modelData.undone
+              iconText: "󰕌" // nf-md-undo
+              tooltipText: "Undo this change"
+              foreground: entryItem.armed ? Color.urgent : root.dim
+              onClicked: root.undoEntry(entryItem.modelData)
             }
           }
         }
@@ -384,7 +428,7 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             text: "Connect " + (root.source ? root.source.agents.filter(function(a) { return !a.connected }).map(function(a) { return a.name }).join(" + ") : "")
             bordered: true
-            tooltipText: "Adds the syschange skill and a Stop hook. Undo: syschange agents remove"
+            tooltipText: "Adds the syschange skill and hooks. Undo: syschange agents remove"
             onClicked: root.source.connectAgents()
           }
         }

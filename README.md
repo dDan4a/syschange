@@ -1,0 +1,103 @@
+# syschange
+
+A history of changes to your Linux setup, with a reason for each one and undo.
+
+You tweak a keybinding, install a package, enable a service. A week later something is off and you
+don't remember what you touched, or your AI agent changed it while fixing something else.
+syschange notices every change to your setup and asks for a one-line description. You can see the
+diff and undo it.
+
+- **Config files in `~/.config`**: kept in a private shadow git repository, so every edit has a diff
+  and can be undone.
+- **Packages** you installed explicitly (`pacman`, AUR included) and **systemd services** you enabled,
+  system and user.
+- **Human names**: "Hyprland: Key bindings" instead of `hypr/bindings.lua`.
+- **AI agents describe their own changes.** One click gives Claude Code and Codex a skill and a Stop
+  hook. When an agent changed your system during a session, it records why before it finishes.
+- **Export** to Markdown: the steps to repeat your setup on a new machine, plus the history.
+- **Omarchy bar widget**: new changes, history, describe, diff, undo.
+
+Browser and Electron profiles, caches, databases, binaries and anything that looks like a password,
+token or key are never copied into the history.
+
+## Install
+
+```bash
+go install github.com/dDan4a/syschange@latest      # or: go build -o ~/.local/bin/syschange .
+syschange init
+```
+
+The Omarchy bar widget:
+
+```bash
+omarchy plugin add https://github.com/dDan4a/syschange.git --enable --yes
+```
+
+If `syschange` is not on the shell's `PATH` (for example it lives in `~/go/bin`), set the full path in
+the widget settings.
+
+## Use
+
+```text
+$ syschange status
+Hyprland  [hypr]
+  ~ Key bindings  +1 -0
+Packages  [packages]
+  + voxtype
+
+$ syschange note "Voice typing on Super+R" hypr voxtype
+Recorded 2 change(s).
+```
+
+| Command | What it does |
+|---|---|
+| `syschange status [--json]` | changes not recorded yet |
+| `syschange note [--by NAME] TEXT [ID...]` | record changes with a reason |
+| `syschange skip [ID...]` | record changes without a reason |
+| `syschange diff [ID...]` | what changed in config files |
+| `syschange revert ID...` | undo config changes; prints the `sudo` command for packages and services |
+| `syschange ignore PATH` | never track this path |
+| `syschange log` | the history |
+| `syschange export` | Markdown: setup steps and history |
+| `syschange agents [install\|remove]` | connect Claude Code and Codex |
+
+An ID is a file inside `~/.config` (`hypr/bindings.lua`), an app directory (`hypr`), a package or unit name,
+or a group (`packages`, `services`). No ID means everything.
+
+In the bar panel: `↑↓` select, `Enter` describe, `s` keep without a description, `v` diff, `r` refresh.
+The undo button on each line asks for a second click.
+
+## AI agents
+
+```bash
+syschange agents install
+```
+
+This links the [skill](skill/SKILL.md) into `~/.claude/skills`, `~/.agents/skills` and `~/.codex/skills`, and adds a
+Stop hook to `~/.claude/settings.json` and `~/.codex/hooks.json` (the original is saved as `*.syschange.bak`).
+
+The hook only looks at what changed **during the agent's session**: config files modified and packages
+installed after the session started. It asks once, so an agent is never stuck in a loop.
+Records made by an agent carry its name in the history. `syschange agents remove` undoes all of it.
+
+## Where things live
+
+| Path | What |
+|---|---|
+| `~/.local/state/syschange/config.git` | shadow repository of `~/.config` |
+| `~/.local/state/syschange/config.git/info/exclude` | what is never tracked, gitignore syntax |
+| `~/.local/state/syschange/journal.jsonl` | the history with descriptions |
+| `~/.local/state/syschange/*.txt` | accepted package and service lists |
+
+The state directory is `0700`. Nothing leaves your machine.
+
+## Limits
+
+- `/etc` is not tracked yet.
+- Directories that are git repositories of their own (for example plugins cloned into `~/.config`) are
+  not tracked file by file.
+- Files over 256 KB are skipped.
+
+## License
+
+MIT

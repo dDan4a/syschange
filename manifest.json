@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "dan4a.syschange",
+  "name": "System Changes",
+  "version": "0.1.0",
+  "author": "dDan4a",
+  "license": "MIT",
+  "description": "A history of changes to your setup: config files, packages and services. Describe each change in one line, see the diff, undo it with a click. Shows what your AI agents changed too.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "ChangeSource.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "System Changes",
+    "description": "New config, package and service changes, with history and undo",
+    "category": "System",
+    "aliases": [
+      "changes",
+      "history",
+      "config",
+      "dotfiles",
+      "undo",
+      "changelog",
+      "agents"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "binary": "syschange",
+      "refreshIntervalSec": 30
+    },
+    "schema": [
+      {
+        "key": "binary",
+        "type": "string",
+        "label": "syschange binary",
+        "defaultValue": "syschange",
+        "description": "Name or full path of the syschange CLI, for example ~/go/bin/syschange."
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh every (seconds)",
+        "min": 10,
+        "max": 600,
+        "step": 10,
+        "defaultValue": 30
+      }
+    ]
+  },
+  "keepLoaded": true
+}

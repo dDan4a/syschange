@@ -184,7 +184,7 @@ Panel {
         PanelHero {
           width: parent.width
           title: "System changes"
-          meta: !root.source ? "" : !root.source.initialized ? "Not tracking yet"
+          meta: !root.source ? "" : root.source.missing ? "Not installed" : !root.source.initialized ? "Not tracking yet"
             : root.source.count === 0 ? "Everything is recorded" : root.source.count + " new"
           detail: root.source && root.source.error !== "" ? "Error" : ""
           foreground: root.foreground
@@ -219,9 +219,32 @@ Panel {
           textFormat: Text.PlainText
         }
 
+        // No CLI yet: build it from here. An old CLI: offer the update.
+        Column {
+          visible: root.source !== null && (root.source.missing || root.source.outdated)
+          width: parent.width
+          spacing: Style.space(8)
+          Text {
+            width: parent.width
+            text: root.source && root.source.missing
+              ? "This widget needs the syschange command. Install builds it from github.com/dDan4a/syschange (v" + root.source.cliVersion + ") into ~/.local/bin with Go. No Go yet? mise fetches one just for the build. Then tracking starts."
+              : "syschange " + (root.source ? root.source.version : "") + " is older than this widget expects (" + (root.source ? root.source.cliVersion : "") + ")."
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            wrapMode: Text.Wrap
+          }
+          Button {
+            text: root.source && root.source.missing ? "Install syschange" : "Update syschange"
+            bordered: true
+            tooltipText: "Opens a terminal and runs go install, then syschange init"
+            onClicked: root.source.installCli()
+          }
+        }
+
         // First run: one button to start.
         Column {
-          visible: root.source !== null && !root.source.initialized
+          visible: root.source !== null && !root.source.missing && !root.source.initialized
           width: parent.width
           spacing: Style.space(8)
           Text {

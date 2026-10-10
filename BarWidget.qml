@@ -63,7 +63,8 @@ BarWidget {
     text: root.count > 0 ? "󰋚 " + root.count : "󰋚"
     foreground: root.error !== "" ? Color.urgent : root.count > 0 ? Color.accent : (root.bar ? root.bar.barForeground : Color.foreground)
     dimmed: root.count === 0 && root.error === ""
-    tooltipText: root.error !== "" ? "System changes: " + root.error
+    tooltipText: root.source && root.source.missing ? "System changes: click to install"
+      : root.error !== "" ? "System changes: " + root.error
       : root.count === 0 ? "System changes: everything is recorded"
       : "System changes: " + root.count + " new, click to describe or undo"
     onPressed: root.togglePanel()

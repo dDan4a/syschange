@@ -16,6 +16,9 @@ import (
 	"golang.org/x/term"
 )
 
+// version is the CLI release; the Omarchy plugin asks for at least its own.
+const version = "0.1.0"
+
 const usage = `syschange keeps a history of changes to your system setup.
 
 Usage:
@@ -40,6 +43,7 @@ Usage:
   syschange agents [install [NAME...]|remove]
                                        connect Claude Code, Codex, Gemini CLI, Grok: skill + hooks
   syschange hook AGENT [start]         the hooks themselves (read stdin)
+  syschange version                    print the version
 
 ID is a file path inside ~/.config (hypr/bindings.conf), an app directory (hypr),
 a package or unit name, or a group: packages, services. No ID means all changes.
@@ -55,6 +59,10 @@ func main() {
 func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		fmt.Fprint(stdout, usage)
+		return nil
+	}
+	if args[0] == "version" || args[0] == "--version" {
+		fmt.Fprintln(stdout, version)
 		return nil
 	}
 	s, err := DefaultStore()
@@ -243,10 +251,11 @@ type statusJSON struct {
 	Agents      []AgentState `json:"agents"`
 	Checkpoints []Checkpoint `json:"checkpoints"`
 	AutoExport  string       `json:"autoExport"` // file kept in sync, if any
+	Version     string       `json:"version"`
 }
 
 func status(s *Store, w io.Writer, asJSON bool) error {
-	out := statusJSON{Initialized: s.Initialized(), ConfigDir: s.ConfigDir, Pending: []Group{}, History: []Entry{}, Agents: []AgentState{}, Checkpoints: []Checkpoint{}}
+	out := statusJSON{Initialized: s.Initialized(), ConfigDir: s.ConfigDir, Pending: []Group{}, History: []Entry{}, Agents: []AgentState{}, Checkpoints: []Checkpoint{}, Version: version}
 	if g, err := DefaultAgents(); err == nil {
 		if states, err := g.Status(); err == nil {
 			out.Agents = append(out.Agents, states...)

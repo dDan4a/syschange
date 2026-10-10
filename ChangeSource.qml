@@ -8,6 +8,12 @@ Item {
   id: root
 
   property string binary: "syschange"
+  // The CLI release this plugin is written for. The install button builds
+  // exactly this tag, never an unpinned branch.
+  readonly property string cliVersion: "0.1.0"
+  property bool missing: false      // the CLI is not installed
+  property string version: ""       // the installed CLI's version
+  readonly property bool outdated: version !== "" && newer(cliVersion, version)
   property int intervalSec: 30
   property string exportPath: ""
   property string autoExport: ""    // file the CLI keeps in sync, if any
@@ -32,8 +38,32 @@ Item {
 
   function refresh() {
     if (statusProcess.running) return
-    statusProcess.command = [binary, "status", "--json"]
+    // Through sh, so a missing binary is a clear exit 127 instead of a failed spawn.
+    statusProcess.command = ["sh", "-c", 'command -v "$0" >/dev/null 2>&1 || exit 127; exec "$0" status --json', binary]
     statusProcess.running = true
+  }
+
+  // newer("0.2.0", "0.1.3") === true
+  function newer(a, b) {
+    var x = a.split("."), y = b.split(".")
+    for (var i = 0; i < 3; i++) {
+      var d = (parseInt(x[i]) || 0) - (parseInt(y[i]) || 0)
+      if (d !== 0) return d > 0
+    }
+    return false
+  }
+
+  // Builds the CLI from source in a terminal: with the user's Go if there is
+  // one, else with a Go that mise fetches for this command only. Then starts
+  // tracking (or, on an update, refreshes the hooks).
+  function installCli() {
+    var script = 'set -e; export GOBIN="$HOME/.local/bin"; mod="github.com/dDan4a/syschange@v' + cliVersion + '"; ' +
+      'echo "Building $mod into $GOBIN"; ' +
+      'if command -v go >/dev/null 2>&1; then go install "$mod"; else mise exec go@latest -- go install "$mod"; fi; ' +
+      '"$GOBIN/syschange" init; echo; echo "Done. The bar picks it up in a few seconds."'
+    Quickshell.execDetached(["setsid", "uwsm-app", "--", "xdg-terminal-exec", "--app-id=org.omarchy.terminal",
+      "--title=Install syschange", "-e", "bash", "-c", script + '; read -rsn1 -p "Press any key to close"'])
+    installPoll.restart()
   }
 
   function act(args) {
@@ -114,7 +144,6 @@ Item {
   function failure(text) {
     var msg = String(text || "").trim().replace(/^syschange: /, "")
     if (msg === "") msg = "syschange failed"
-    if (/not found|No such file/.test(msg)) msg = "syschange is not installed: go install github.com/dDan4a/syschange@latest"
     error = msg.length > 400 ? msg.slice(0, 397) + "..." : msg
   }
 
@@ -123,6 +152,19 @@ Item {
   IpcHandler {
     target: "dan4a.syschange"
     function refresh(): void { root.refresh() }
+  }
+
+  // While an install runs in the terminal, look for the binary more often.
+  Timer {
+    id: installPoll
+    interval: 3000
+    repeat: true
+    property int ticks: 0
+    onRunningChanged: if (running) ticks = 0
+    onTriggered: {
+      root.refresh()
+      if (++ticks > 100 || (!root.missing && !root.outdated && root.initialized)) stop()
+    }
   }
 
   Timer {
@@ -137,6 +179,8 @@ Item {
     stdout: StdioCollector { id: statusOut; waitForEnd: true }
     stderr: StdioCollector { id: statusErr; waitForEnd: true }
     onExited: function(exitCode) {
+      root.missing = exitCode === 127
+      if (root.missing) { root.error = ""; root.initialized = false; return }
       if (exitCode !== 0) { root.failure(statusErr.text || statusOut.text); return }
       try {
         var changed = statusOut.text !== root.lastStatus
@@ -149,6 +193,7 @@ Item {
         root.agents = s.agents || []
         root.checkpoints = s.checkpoints || []
         root.autoExport = s.autoExport || ""
+        root.version = s.version || "0.0.0"
         // The shown diff follows the files: reload it when anything changed.
         if (changed && root.diffKey !== "") {
           var still = root.pending.some(function(g) { return g.key === root.diffKey })

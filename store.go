@@ -192,11 +192,122 @@ func (s *Store) trackable(rel string) bool {
 	}
 	// The history must not become a second copy of your passwords.
 	body, err := os.ReadFile(full)
-	return err == nil && !secretLike.Match(body)
+	return err == nil && !looksSecret(body)
 }
 
-// secretLike matches a password, token or key assignment with a real value.
-var secretLike = regexp.MustCompile(`(?i)(password|passwd|secret|token|api[_-]?key|private[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']?[^"'\s,}{]{6,}`)
+// looksSecret applies secretLike, minus settings that only name where secrets
+// live, such as Chromium's --password-store=gnome-libsecret.
+func looksSecret(body []byte) bool {
+	for _, m := range secretLike.FindAll(body, -1) {
+		if !bytes.Contains(bytes.ToLower(m), []byte("password-store")) {
+			return true
+		}
+	}
+	return false
+}
+
+// secretLike matches a password, token or key: an assignment to a secret-sounding
+// name, or a value that has the shape of a known credential wherever it is.
+var secretLike = regexp.MustCompile(`(?i)` +
+	`[\w.-]*(password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key|credential|auth|bearer)[\w.-]*["']?\s*[:=]\s*["']?(bearer\s+)?[^"'\s,}{]{6,}` +
+	`|\b(ghp|gho|ghu|ghs|ghr)_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}|glpat-[a-z0-9_-]{20,}|xox[abpr]-[a-z0-9-]{10,}` +
+	`|\bsk-[a-z0-9_-]{20,}|\bAKIA[0-9A-Z]{16}\b|\bAIza[0-9a-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----` +
+	`|[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@`)
+
+// writeAtomic replaces a file in one step, through a unique temp file next to it.
+func writeAtomic(path string, data []byte, perm os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+// safePath accepts a path that stays inside the config directory: relative,
+// without "..", and free of control characters that could fool a terminal.
+func safePath(p string) bool {
+	if !filepath.IsLocal(p) {
+		return false
+	}
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+// writeEntry writes a file (or a symlink) inside the config directory. Through
+// os.Root, ".." and symlinked parent directories can never lead outside it, and
+// an existing symlink is replaced, never written through.
+func (s *Store) writeEntry(path string, body []byte, link bool) error {
+	if !safePath(path) {
+		return fmt.Errorf("refusing unsafe path %q", path)
+	}
+	root, err := os.OpenRoot(s.ConfigDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err := root.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	mode := os.FileMode(0o644)
+	if info, err := root.Lstat(path); err == nil && info.Mode().IsRegular() {
+		mode = info.Mode().Perm()
+	}
+	if err := root.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if link {
+		return root.Symlink(string(body), path)
+	}
+	return root.WriteFile(path, body, mode)
+}
+
+// removeEntry removes a file or symlink inside the config directory.
+func (s *Store) removeEntry(path string) error {
+	if !safePath(path) {
+		return fmt.Errorf("refusing unsafe path %q", path)
+	}
+	root, err := os.OpenRoot(s.ConfigDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err := root.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// unsaved lists changed files that syschange cannot keep a copy of (secrets,
+// binaries, large files). Overwriting them would lose them for good.
+func (s *Store) unsaved() ([]string, error) {
+	out, err := s.git(nil, "diff", "--name-only", "-z", "--no-renames", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range splitNul(out) {
+		if _, err := os.Lstat(filepath.Join(s.ConfigDir, p)); err == nil && !s.trackable(p) {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
 
 // autoExclude excludes directories that look like browser or Electron
 // profiles, up to two levels deep. They change on every launch and are app

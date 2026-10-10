@@ -431,7 +431,7 @@ func TestSuggest(t *testing.T) {
 	s, _ := newTestStore(t)
 	bin := t.TempDir()
 	// A fake agent: prints chatter, then the answer, and records the prompt it got.
-	script := "#!/bin/sh\nfor a; do last=$a; done\nprintf '%s' \"$last\" > " + filepath.Join(bin, "prompt") + "\necho 'Thinking...'\necho '\"Голосовой ввод по Super+R.\"'\n"
+	script := "#!/bin/sh\ncat > " + filepath.Join(bin, "prompt") + "\necho 'Thinking...'\necho '- \"Голосовой ввод по Super+R.\"'\n"
 	os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755)
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	t.Setenv("LANG", "ru_RU.UTF-8")
@@ -698,7 +698,7 @@ func TestApplyFromBackup(t *testing.T) {
 	if err := b.Apply(plan, run, ""); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(ran, []string{"sudo pacman -S --needed voxtype", "systemctl --user enable --now voxtype.service"}) {
+	if !slices.Equal(ran, []string{"sudo pacman -S --needed -- voxtype", "systemctl --user enable --now -- voxtype.service"}) {
 		t.Fatalf("ran %v", ran)
 	}
 	if got, _ := os.ReadFile(filepath.Join(b.ConfigDir, "hypr/bindings.conf")); string(got) != "bind = SUPER, R, exec, voxtype\n" {

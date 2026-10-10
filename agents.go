@@ -156,6 +156,7 @@ func (g *Agents) Install(names ...string) ([]string, error) {
 		return nil, err
 	}
 	var done []string
+	backups := map[string]bool{}
 	for _, a := range agents(g.Home) {
 		if !a.installed() || (len(names) > 0 && !slices.Contains(names, a.Name)) {
 			continue
@@ -165,7 +166,7 @@ func (g *Agents) Install(names ...string) ([]string, error) {
 				return done, err
 			}
 		}
-		if err := g.addHooks(a); err != nil {
+		if err := g.addHooks(a, backups); err != nil {
 			return done, err
 		}
 		done = append(done, a.Name)
@@ -197,6 +198,7 @@ func (g *Agents) linkSkill(dir string) error {
 
 // Remove disconnects every agent: our skill links and Stop hooks go away.
 func (g *Agents) Remove() error {
+	backups := map[string]bool{}
 	for _, a := range agents(g.Home) {
 		for _, dir := range a.SkillDirs {
 			link := filepath.Join(dir, "syschange")
@@ -215,8 +217,11 @@ func (g *Agents) Remove() error {
 			}
 			continue
 		}
+		if err := backupOnce(a.HookFile, backups); err != nil {
+			return err
+		}
 		for _, ev := range a.events() {
-			if err := jqEdit(a.HookFile, `if .hooks[$ev] then .hooks[$ev] |= (map(.hooks |= map(select(.command | test($m) | not))) | map(select(.hooks | length > 0))) | if .hooks[$ev] == [] then del(.hooks[$ev]) else . end else . end`,
+			if err := jqEdit(a.HookFile, `if .hooks[$ev] then .hooks[$ev] |= (map(.hooks |= map(select((.command // "") | test($m) | not))) | map(select(.hooks | length > 0))) | if .hooks[$ev] == [] then del(.hooks[$ev]) else . end else . end`,
 				"--arg", "m", hookMarker, "--arg", "ev", ev); err != nil {
 				return err
 			}
@@ -233,14 +238,14 @@ func hasHook(file, event string) (bool, error) {
 		return false, nil
 	}
 	out, err := exec.Command("jq", "--arg", "m", hookMarker, "--arg", "ev", event,
-		`[.hooks[$ev][]?.hooks[]?.command | select(test($m))] | length > 0`, file).Output()
+		`[.hooks[$ev][]?.hooks[]?.command // "" | select(test($m))] | length > 0`, file).Output()
 	if err != nil {
 		return false, fmt.Errorf("jq %s: %w", file, err)
 	}
 	return strings.TrimSpace(string(out)) == "true", nil
 }
 
-func (g *Agents) addHooks(a agent) error {
+func (g *Agents) addHooks(a agent, backups map[string]bool) error {
 	if err := os.MkdirAll(filepath.Dir(a.HookFile), 0o755); err != nil {
 		return err
 	}
@@ -248,6 +253,9 @@ func (g *Agents) addHooks(a agent) error {
 		if err := os.WriteFile(a.HookFile, []byte("{}\n"), 0o644); err != nil {
 			return err
 		}
+	}
+	if err := backupOnce(a.HookFile, backups); err != nil {
+		return err
 	}
 	for _, ev := range a.events() {
 		timeout := 30
@@ -271,9 +279,29 @@ func (g *Agents) addHooks(a agent) error {
 	return nil
 }
 
-// jqEdit rewrites a JSON file with jq, which keeps the user's key order.
-// A copy of the original is left next to it.
+// backupOnce keeps a copy of an agent's config as it was before syschange
+// touched it in this run: file.syschange.bak.
+func backupOnce(file string, done map[string]bool) error {
+	if done[file] {
+		return nil
+	}
+	done[file] = true
+	orig, err := os.ReadFile(file)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(file+".syschange.bak", orig, 0o600)
+}
+
+// jqEdit rewrites a JSON file with jq, which keeps the user's key order. A
+// symlinked config (dotfiles) is edited at its target, keeping the link.
 func jqEdit(file, filter string, args ...string) error {
+	if real, err := filepath.EvalSymlinks(file); err == nil {
+		file = real
+	}
 	orig, err := os.ReadFile(file)
 	if err != nil {
 		return err
@@ -286,18 +314,11 @@ func jqEdit(file, filter string, args ...string) error {
 	if string(out) == string(orig) {
 		return nil
 	}
-	if err := os.WriteFile(file+".syschange.bak", orig, 0o600); err != nil {
-		return err
-	}
 	info, err := os.Stat(file)
 	if err != nil {
 		return err
 	}
-	tmp := file + ".syschange.tmp"
-	if err := os.WriteFile(tmp, out, info.Mode().Perm()); err != nil {
-		return err
-	}
-	return os.Rename(tmp, file)
+	return writeAtomic(file, out, info.Mode().Perm())
 }
 
 func shellQuote(s string) string {

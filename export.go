@@ -214,14 +214,13 @@ func (s *Store) ExportTo(path string) error {
 	if err := s.Export(&b); err != nil {
 		return err
 	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real // a linked note stays linked
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".syschange.tmp"
-	if err := os.WriteFile(tmp, b.Bytes(), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeAtomic(path, b.Bytes(), 0o644)
 }
 
 // SetAutoExport keeps a Markdown file in sync with the history: it is

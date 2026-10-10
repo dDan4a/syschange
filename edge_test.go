@@ -161,7 +161,7 @@ func TestApplyAURServicesAndFailures(t *testing.T) {
 		}
 		return nil
 	}, "")
-	if err == nil || !strings.Contains(err.Error(), "enabling bluetooth.service") || !slices.Contains(ran, "sudo systemctl enable --now bluetooth.service") {
+	if err == nil || !strings.Contains(err.Error(), "enabling bluetooth.service") || !slices.Contains(ran, "sudo systemctl enable --now -- bluetooth.service") {
 		t.Fatalf("err %v ran %v", err, ran)
 	}
 	plan.Units = nil

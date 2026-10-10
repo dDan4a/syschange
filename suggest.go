@@ -82,11 +82,14 @@ func locale() string {
 // headless mode are supported; Omarchy's lazy installers are never triggered
 // for an agent the user did not choose.
 func runAgent(ctx context.Context, agent, prompt string) (string, error) {
+	// The prompt goes on stdin (or a private file), never on the command line,
+	// where other local users could read it in /proc.
 	var args []string
 	var outFile string
+	stdin := prompt
 	switch agent {
 	case "claude":
-		args = []string{"claude", "-p", "--model", "haiku", "--tools", "", "--no-session-persistence", prompt}
+		args = []string{"claude", "-p", "--model", "haiku", "--tools", "", "--no-session-persistence"}
 	case "codex":
 		f, err := os.CreateTemp("", "syschange-suggest-")
 		if err != nil {
@@ -95,13 +98,22 @@ func runAgent(ctx context.Context, agent, prompt string) (string, error) {
 		f.Close()
 		defer os.Remove(f.Name())
 		outFile = f.Name()
-		args = []string{"codex", "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-o", outFile, prompt}
+		args = []string{"codex", "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-o", outFile, "-"}
 	case "gemini":
-		args = []string{"gemini", "-p", prompt}
+		args = []string{"gemini", "-p", "Follow the instructions given on stdin."} // Gemini appends stdin to -p
 	case "grok":
-		args = []string{"grok", "-p", prompt, "--max-turns", "1"}
+		f, err := os.CreateTemp("", "syschange-prompt-")
+		if err != nil {
+			return "", err
+		}
+		defer os.Remove(f.Name())
+		f.WriteString(prompt)
+		f.Close()
+		args = []string{"grok", "--prompt-file", f.Name(), "--max-turns", "1"}
+		stdin = ""
 	case "opencode":
-		args = []string{"opencode", "run", prompt}
+		args = []string{"opencode", "run", prompt} // no confirmed stdin mode
+		stdin = ""
 	default:
 		return "", fmt.Errorf("describing with %q is not supported; use claude, codex, gemini, grok or opencode (syschange suggest --agent NAME)", agent)
 	}
@@ -111,6 +123,7 @@ func runAgent(ctx context.Context, agent, prompt string) (string, error) {
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = os.TempDir() // not inside a project the agent might start exploring
 	cmd.Env = append(os.Environ(), "SYSCHANGE_SUGGEST=1")
+	cmd.Stdin = strings.NewReader(stdin)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -150,7 +163,8 @@ func readFileString(path string) (string, error) {
 func lastLine(out string) string {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.Trim(strings.TrimSpace(lines[i]), "\"'`«»“”")
+		line := strings.TrimLeft(strings.TrimSpace(lines[i]), "-*• ")
+		line = strings.Trim(line, "\"'`«»“”")
 		line = strings.TrimSuffix(line, ".")
 		if line != "" {
 			if r := []rune(line); len(r) > 120 {

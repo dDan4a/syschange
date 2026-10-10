@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -122,6 +121,11 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 		return "", fmt.Errorf("no checkpoint %q", name)
 	}
 	target := all[i]
+	if risky, err := s.unsaved(); err != nil {
+		return "", err
+	} else if len(risky) > 0 {
+		return "", fmt.Errorf("these files have changes a checkpoint cannot keep (secrets, binary or large files), so a restore would lose them: %s. Revert them or stop tracking them first", strings.Join(risky, ", "))
+	}
 	if _, err := s.Checkpoint("Before restoring " + target.Name); err != nil {
 		return "", err
 	}
@@ -141,7 +145,7 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	}
 	for _, f := range extra {
 		if !slices.Contains(keep, f) {
-			if err := os.Remove(filepath.Join(s.ConfigDir, f)); err != nil {
+			if err := s.removeEntry(f); err != nil {
 				return "", err
 			}
 		}

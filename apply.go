@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -38,6 +39,13 @@ type Plan struct {
 func (p *Plan) Empty() bool {
 	return len(p.Files) == 0 && len(p.Repo) == 0 && len(p.AUR) == 0 && len(p.Units) == 0
 }
+
+// Names from a backup end up as arguments of sudo pacman and systemctl: only
+// plain names, never something that could pass for an option.
+var (
+	packageName = regexp.MustCompile(`^[a-zA-Z0-9@_+][a-zA-Z0-9@._+-]*$`)
+	unitLine    = regexp.MustCompile(`^(system|user) [a-zA-Z0-9@_:\\][a-zA-Z0-9@._:\\-]*\.(service|socket|timer|path|target|mount|automount|swap|slice)$`)
+)
 
 // fetchBackup clones the backup's branches into a temporary bare repository.
 func fetchBackup(source string) (string, error) {
@@ -106,6 +114,10 @@ func (s *Store) PlanApply(source string) (*Plan, error) {
 	fields := splitNul(diff)
 	for i := 0; i+1 < len(fields); i += 2 {
 		status, path := fields[i], fields[i+1]
+		if !safePath(path) {
+			p.Cleanup()
+			return nil, fmt.Errorf("the backup has an unsafe path %q: refusing it", path)
+		}
 		local := filepath.Join(s.ConfigDir, path)
 		current, exists := readEntry(local)
 		if status == "D" {
@@ -119,12 +131,20 @@ func (s *Store) PlanApply(source string) (*Plan, error) {
 			p.Cleanup()
 			return nil, err
 		}
-		mode, _ := gitAt(dir, "ls-tree", "config", "--", path)
+		mode, err := gitAt(dir, "ls-tree", "config", "--", path)
+		if err != nil {
+			p.Cleanup()
+			return nil, err
+		}
 		fa := FileAction{Path: path, Action: "add", body: body, link: strings.HasPrefix(string(mode), "120000")}
 		if exists {
 			if bytes.Equal(current, body) {
 				p.Skipped++
 				continue
+			}
+			if !isLink(local) && !s.trackable(path) {
+				p.Cleanup()
+				return nil, fmt.Errorf("~/.config/%s would be overwritten, but it holds something syschange cannot keep (a secret, binary or large file); move it away first", path)
 			}
 			fa.Action = "overwrite"
 		}
@@ -136,6 +156,18 @@ func (s *Store) PlanApply(source string) (*Plan, error) {
 	if err != nil {
 		p.Cleanup()
 		return nil, err
+	}
+	for _, list := range []string{"packages.txt", "packages.init.txt", "packages.aur.txt", "units.txt", "units.init.txt"} {
+		valid := packageName
+		if strings.HasPrefix(list, "units") {
+			valid = unitLine
+		}
+		for _, name := range stateLines(dir, list) {
+			if !valid.MatchString(name) {
+				p.Cleanup()
+				return nil, fmt.Errorf("the backup lists an invalid name %q in %s: refusing it", name, list)
+			}
+		}
 	}
 	aur := stateLines(dir, "packages.aur.txt")
 	for _, c := range setChanges("package", stateLines(dir, "packages.init.txt"), stateLines(dir, "packages.txt")) {
@@ -204,43 +236,32 @@ func (s *Store) Apply(p *Plan, run func(args ...string) error, by string) error 
 	}
 	var ids []string
 	for _, f := range p.Files {
-		full := filepath.Join(s.ConfigDir, f.Path)
-		// Remove first: a symlink may become a file or the other way round.
-		if err := os.Remove(full); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		ids = append(ids, f.Path)
-		if f.Action == "delete" {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			return err
-		}
 		var err error
-		if f.link {
-			err = os.Symlink(string(f.body), full)
+		if f.Action == "delete" {
+			err = s.removeEntry(f.Path)
 		} else {
-			err = os.WriteFile(full, f.body, 0o644)
+			err = s.writeEntry(f.Path, f.body, f.link)
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("%s: %w", f.Path, err)
 		}
+		ids = append(ids, f.Path)
 	}
 	if len(p.Repo) > 0 {
-		if err := run(append([]string{"sudo", "pacman", "-S", "--needed"}, p.Repo...)...); err != nil {
+		if err := run(append([]string{"sudo", "pacman", "-S", "--needed", "--"}, p.Repo...)...); err != nil {
 			return fmt.Errorf("installing packages: %w (config files are applied; run apply again after fixing)", err)
 		}
 	}
 	if len(p.AUR) > 0 {
-		if err := run(append([]string{"yay", "-S", "--needed"}, p.AUR...)...); err != nil {
+		if err := run(append([]string{"yay", "-S", "--needed", "--"}, p.AUR...)...); err != nil {
 			return fmt.Errorf("installing AUR packages: %w", err)
 		}
 	}
 	for _, u := range p.Units {
 		scope, unit, _ := strings.Cut(u, " ")
-		args := []string{"sudo", "systemctl", "enable", "--now", unit}
+		args := []string{"sudo", "systemctl", "enable", "--now", "--", unit}
 		if scope == "user" {
-			args = []string{"systemctl", "--user", "enable", "--now", unit}
+			args = []string{"systemctl", "--user", "enable", "--now", "--", unit}
 		}
 		if err := run(args...); err != nil {
 			return fmt.Errorf("enabling %s: %w", unit, err)

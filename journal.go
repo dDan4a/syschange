@@ -214,30 +214,14 @@ func (s *Store) Undo(id, by string) (Entry, string, error) {
 		}
 	}
 	for path, body := range merged {
-		full := filepath.Join(s.ConfigDir, path)
-		if body == nil || links[path] {
-			if err := os.Remove(full); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return Entry{}, "", err
-			}
-		}
+		var err error
 		if body == nil {
-			continue
+			err = s.removeEntry(path)
+		} else {
+			err = s.writeEntry(path, body, links[path])
 		}
-		if links[path] {
-			if err := os.Symlink(string(body), full); err != nil {
-				return Entry{}, "", err
-			}
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			return Entry{}, "", err
-		}
-		mode := os.FileMode(0o644)
-		if info, err := os.Stat(full); err == nil {
-			mode = info.Mode().Perm()
-		}
-		if err := os.WriteFile(full, body, mode); err != nil {
-			return Entry{}, "", err
+		if err != nil {
+			return Entry{}, "", fmt.Errorf("%s: %w (files before it in this undo are already changed; see syschange status)", path, err)
 		}
 	}
 	note := target.Note
@@ -329,8 +313,7 @@ func (s *Store) Revert(items []string) error {
 	for _, c := range chosen {
 		switch {
 		case c.Kind == "config" && c.Op == "added":
-			// Paths come from git status, so they are always inside ConfigDir.
-			if err := os.Remove(filepath.Join(s.ConfigDir, c.Name)); err != nil {
+			if err := s.removeEntry(c.Name); err != nil {
 				return err
 			}
 		case c.Kind == "config":
@@ -380,8 +363,16 @@ func (s *Store) Ignore(pattern string) error {
 	if err := appendLines(s.excludeFile(), []string{"/" + strings.TrimPrefix(pattern, "/")}); err != nil {
 		return err
 	}
-	if _, err := s.git(nil, "rm", "-r", "--cached", "--quiet", "--ignore-unmatch", "--", strings.TrimPrefix(pattern, "/")); err != nil {
+	// Excludes do not apply to tracked files: untrack whatever the pattern now
+	// matches, globs included.
+	matched, err := s.git(nil, "ls-files", "-z", "--cached", "--ignored", "--exclude-standard")
+	if err != nil {
 		return err
+	}
+	if files := splitNul(matched); len(files) > 0 {
+		if _, err := s.git(nulJoin(files), "rm", "--cached", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+			return err
+		}
 	}
 	staged, err := s.git(nil, "diff", "--cached", "--name-only")
 	if err != nil || len(staged) == 0 {

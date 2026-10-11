@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/godbus/dbus/v5"
 )
 
 // Notifications nudge without nagging: a reminder when changes have waited
@@ -23,6 +25,19 @@ type Notification struct {
 type notified struct {
 	Remind string `json:"remind,omitempty"` // day of the last reminder
 	Digest string `json:"digest,omitempty"` // week of the last digest
+}
+
+// sendNotification shows a notification over D-Bus. The text never goes
+// through a command line (notify-send), where other local users could read it.
+var sendNotification = func(n Notification) error {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return err
+	}
+	return conn.Object("org.freedesktop.Notifications", "/org/freedesktop/Notifications").Call(
+		"org.freedesktop.Notifications.Notify", 0,
+		"System changes", uint32(0), "document-open-recent", n.Summary, n.Body,
+		[]string{}, map[string]dbus.Variant{}, int32(-1)).Err
 }
 
 // OldestPending is when the oldest unrecorded change was made, as far as

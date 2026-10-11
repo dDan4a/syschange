@@ -74,6 +74,14 @@ func TestCLIBasics(t *testing.T) {
 	must(t, c.ok("status"), "Nothing new")
 	must(t, c.ok("digest", "--days", "3"), "Nothing recorded in the last 3 days")
 	must(t, c.ok("notify", "--no-digest"), "[]")
+	var shown []Notification
+	old := sendNotification
+	sendNotification = func(n Notification) error { shown = append(shown, n); return nil }
+	defer func() { sendNotification = old }()
+	write(t, c.s.ConfigDir, "kitty/kitty.conf", "x\n")
+	if out := c.ok("notify", "--send", "--remind-days", "0"); out != "" || len(shown) != 0 {
+		t.Fatalf("nothing due must show nothing: %q %v", out, shown)
+	}
 
 	var st statusJSON
 	if err := json.Unmarshal([]byte(c.ok("status", "--json")), &st); err != nil || !st.Initialized || st.Version != version {

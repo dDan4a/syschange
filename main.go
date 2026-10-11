@@ -18,7 +18,7 @@ import (
 )
 
 // version is the CLI release; the Omarchy plugin asks for at least its own.
-const version = "0.2.0"
+const version = "0.2.1"
 
 const usage = `syschange keeps a history of changes to your system setup.
 
@@ -45,8 +45,8 @@ Usage:
   syschange push                       push now (it happens by itself after every change)
   syschange apply [--yes] BACKUP       bring a backed-up setup to this machine: files, packages, services
   syschange digest [--days N]          sum up the last N days (default 7)
-  syschange notify [--remind-days N] [--no-digest]
-                                       notifications due now, as JSON: a reminder when changes
+  syschange notify [--send] [--remind-days N] [--no-digest]
+                                       notifications due now, shown (--send) or as JSON: a reminder when changes
                                        wait unrecorded N days (default 3, 0 off), once a day,
                                        and last week's digest, once a week
   syschange export [--to FILE]         history and setup steps as Markdown
@@ -93,6 +93,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	autoExport := fs.String("auto", "", "export: keep this file updated after every record; off to stop")
 	days := fs.Int("days", 7, "digest: how many days back")
 	remindDays := fs.Int("remind-days", 3, "notify: remind about changes unrecorded this many days; 0 never")
+	send := fs.Bool("send", false, "notify: show the notifications instead of printing them")
 	noDigest := fs.Bool("no-digest", false, "notify: no weekly digest")
 	grep := fs.String("grep", "", "log: only entries that mention this text")
 	agentName := fs.String("agent", "", "agent for suggest; default: Omarchy's default agent")
@@ -196,7 +197,15 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(stdout).Encode(append([]Notification{}, due...))
+		if !*send {
+			return json.NewEncoder(stdout).Encode(append([]Notification{}, due...))
+		}
+		for _, n := range due {
+			if err := sendNotification(n); err != nil {
+				return fmt.Errorf("notification: %w", err)
+			}
+		}
+		return nil
 	case "log":
 		return printLog(s, stdout, *grep, *asJSON)
 	case "apply":

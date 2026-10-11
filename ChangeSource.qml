@@ -10,7 +10,7 @@ Item {
   property string binary: "syschange"
   // The CLI release this plugin is written for. The install button builds
   // exactly this tag, never an unpinned branch.
-  readonly property string cliVersion: "0.2.0"
+  readonly property string cliVersion: "0.2.1"
   property bool missing: false      // the CLI is not installed
   property string version: ""       // the installed CLI's version
   readonly property bool outdated: version !== "" && newer(cliVersion, version)
@@ -265,23 +265,13 @@ Item {
     onTriggered: {
       interval = 3600 * 1000
       if (root.missing || !root.initialized || notifyProcess.running) return
-      notifyProcess.command = [root.binary, "notify", "--remind-days", String(root.remindDays)].concat(root.weeklyDigest ? [] : ["--no-digest"])
+      // The CLI shows them over D-Bus: their text never appears in a command line.
+      notifyProcess.command = [root.binary, "notify", "--send", "--remind-days", String(root.remindDays)].concat(root.weeklyDigest ? [] : ["--no-digest"])
       notifyProcess.running = true
     }
   }
 
-  Process {
-    id: notifyProcess
-    stdout: StdioCollector { id: notifyOut; waitForEnd: true }
-    onExited: function(exitCode) {
-      if (exitCode !== 0) return
-      try {
-        JSON.parse(notifyOut.text).forEach(function(n) {
-          Quickshell.execDetached(["notify-send", "-a", "System changes", "-i", "document-open-recent", "--", n.summary, n.body])
-        })
-      } catch (e) {}
-    }
-  }
+  Process { id: notifyProcess }
 
   Process {
     id: searchProcess

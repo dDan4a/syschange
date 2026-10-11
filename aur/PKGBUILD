@@ -1,0 +1,26 @@
+# Maintainer: dDan4a <danshtal at gmail dot com>
+pkgname=syschange
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="A history of changes to your setup: config files, packages and services, with diff and undo"
+arch=('x86_64' 'aarch64')
+url="https://github.com/dDan4a/syschange"
+license=('MIT')
+depends=('glibc' 'git' 'jq' 'procps-ng')
+makedepends=('go')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('fa8560426ea899ec0929bfad9f22d8f025b51d186469fd69d628ba2441098ba7')
+
+build() {
+  cd "$pkgname-$pkgver"
+  export CGO_CPPFLAGS="$CPPFLAGS" CGO_CFLAGS="$CFLAGS" CGO_CXXFLAGS="$CXXFLAGS" CGO_LDFLAGS="$LDFLAGS"
+  export GOFLAGS="-buildmode=pie -trimpath -ldflags=-linkmode=external -mod=readonly -modcacherw"
+  go build -o syschange .
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 syschange "$pkgdir/usr/bin/syschange"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -483,22 +483,19 @@ Panel {
             }
           }
 
-          // Text fields exist only while typing: a live TextField reads the clipboard on every change
-          // (to know whether it could paste), even hidden, and a hostile clipboard owner can stall the shell.
+          // Inputs are LineEdit, not TextField (which reads the clipboard by itself), and exist only while typing.
           Loader {
             id: noteLoader
             active: root.editingKey !== ""
             visible: active
             width: parent.width
-            sourceComponent: TextField {
+            sourceComponent: LineEdit {
               width: noteLoader.width
               placeholderText: root.editingKey === "@checkpoint" ? "Checkpoint name, for example: before new animations (empty: date)" : "Why? For example: voice typing on Super+R"
               foreground: root.foreground
-              font.family: root.fontFamily
-              Keys.onPressed: function(event) {
-                if (event.key === Qt.Key_Escape) { root.cancelDescribe(); event.accepted = true }
-                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.commitDescribe(); event.accepted = true }
-              }
+              fontFamily: root.fontFamily
+              onCanceled: root.cancelDescribe()
+              onAccepted: root.commitDescribe()
             }
           }
 
@@ -554,16 +551,14 @@ Panel {
             active: root.searching
             visible: active
             width: parent.width
-            sourceComponent: TextField {
+            sourceComponent: LineEdit {
               width: searchLoader.width
               placeholderText: "Search: waybar, Super+R, docker…"
               foreground: root.foreground
-              font.family: root.fontFamily
+              fontFamily: root.fontFamily
               onTextChanged: searchDelay.restart()
-              Keys.onPressed: function(event) {
-                if (event.key === Qt.Key_Escape) { root.closeSearch(); event.accepted = true }
-                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { keyCatcher.forceActiveFocus(); event.accepted = true }
-              }
+              onCanceled: root.closeSearch()
+              onAccepted: keyCatcher.forceActiveFocus()
             }
           }
           Timer {

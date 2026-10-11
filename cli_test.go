@@ -72,6 +72,8 @@ func TestCLIBasics(t *testing.T) {
 	c.fails("flag provided but not defined", "status", "--bogus")
 	must(t, c.ok("init"), "Tracking ")
 	must(t, c.ok("status"), "Nothing new")
+	must(t, c.ok("digest", "--days", "3"), "Nothing recorded in the last 3 days")
+	must(t, c.ok("notify", "--no-digest"), "[]")
 
 	var st statusJSON
 	if err := json.Unmarshal([]byte(c.ok("status", "--json")), &st); err != nil || !st.Initialized || st.Version != version {
@@ -89,6 +91,9 @@ func TestCLIRecordFlow(t *testing.T) {
 	must(t, out, "~ Key bindings  +1 -1")
 	must(t, c.ok("diff", "hypr"), "+bind = SUPER, R, exec, voxtype")
 	must(t, c.ok("diff", "--color", "kitty"), "\x1b[")
+	if !strings.Contains(c.ok("status", "--json"), `"oldestPending"`) {
+		t.Fatal("status --json lacks oldestPending")
+	}
 
 	c.fails("note needs a text", "note")
 	c.fails("nothing to record", "note", "why", "nothing-here")

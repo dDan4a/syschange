@@ -773,3 +773,50 @@ func TestOmarchyTouchedYourFiles(t *testing.T) {
 		t.Fatalf("undo note %q", h[0].Note)
 	}
 }
+
+func TestNotifyRemindAndDigest(t *testing.T) {
+	s, pkgs := newTestStore(t)
+	now := time.Now()
+	write(t, s.ConfigDir, "hypr/bindings.conf", "bind = SUPER, R, exec, voxtype\n")
+	*pkgs = append(*pkgs, "voxtype")
+	if _, err := s.Record(nil, "Voice typing", "claude"); err != nil {
+		t.Fatal(err)
+	}
+	write(t, s.ConfigDir, "kitty/kitty.conf", "font_size 12\n")
+	if _, err := s.Record(nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// A change left unrecorded for five days.
+	write(t, s.ConfigDir, "waybar/config.jsonc", "{}\n")
+	old := now.AddDate(0, 0, -5)
+	os.Chtimes(filepath.Join(s.ConfigDir, "waybar/config.jsonc"), old, old)
+
+	if due, _ := s.Notify(now, 7, false); len(due) != 0 {
+		t.Fatalf("five days is under the limit: %+v", due)
+	}
+	due, err := s.Notify(now, 3, false)
+	if err != nil || len(due) != 1 || !strings.Contains(due[0].Summary, "not recorded for 5 days") || !strings.Contains(due[0].Body, "Waybar") {
+		t.Fatalf("reminder %+v %v", due, err)
+	}
+	if due, _ := s.Notify(now.Add(time.Minute), 3, false); len(due) != 0 {
+		t.Fatalf("one reminder a day: %+v", due)
+	}
+
+	// Next week: the digest of this one, once.
+	due, err = s.Notify(now.AddDate(0, 0, 7), 0, true)
+	if err != nil || len(due) != 1 || due[0].Summary != "Your setup last week" {
+		t.Fatalf("digest %+v %v", due, err)
+	}
+	for _, want := range []string{"2 entries, 3 changes.", "Config: Hyprland (1), Kitty (1).", "Installed: voxtype.", "By: claude 1, you 1.", "1 without a description."} {
+		if !strings.Contains(due[0].Body, want) {
+			t.Fatalf("digest lacks %q:\n%s", want, due[0].Body)
+		}
+	}
+	if due, _ := s.Notify(now.AddDate(0, 0, 7).Add(time.Hour), 0, true); len(due) != 0 {
+		t.Fatalf("one digest a week: %+v", due)
+	}
+	if due, _ := s.Notify(now.AddDate(0, 0, 21), 0, true); len(due) != 0 {
+		t.Fatalf("an empty week sends nothing: %+v", due)
+	}
+}

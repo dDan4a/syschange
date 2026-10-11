@@ -212,7 +212,8 @@ Panel {
             width: parent.width
             title: "System changes"
             meta: !root.source ? "" : root.source.missing ? "Not installed" : !root.source.initialized ? "Not tracking yet"
-              : root.source.count === 0 ? "Everything is recorded" : root.source.count + " new"
+              : root.source.count === 0 ? "Everything is recorded"
+              : root.source.count + " new" + (root.source.overdue ? ", waiting " + root.source.pendingDays + " days" : "")
             detail: root.source && root.source.error !== "" ? "Error" : ""
             foreground: root.foreground
             fontFamily: root.fontFamily

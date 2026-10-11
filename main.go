@@ -12,6 +12,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -43,6 +44,11 @@ Usage:
   syschange remote [set URL | off]     back the history up to a private git repository
   syschange push                       push now (it happens by itself after every change)
   syschange apply [--yes] BACKUP       bring a backed-up setup to this machine: files, packages, services
+  syschange digest [--days N]          sum up the last N days (default 7)
+  syschange notify [--remind-days N] [--no-digest]
+                                       notifications due now, as JSON: a reminder when changes
+                                       wait unrecorded N days (default 3, 0 off), once a day,
+                                       and last week's digest, once a week
   syschange export [--to FILE]         history and setup steps as Markdown
   syschange export --auto FILE|off     keep FILE updated after every record
   syschange agents [install [NAME...]|remove]
@@ -85,6 +91,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	quiet := fs.Bool("quiet", false, "push: print nothing")
 	exportTo := fs.String("to", "", "export: write to this file instead of stdout")
 	autoExport := fs.String("auto", "", "export: keep this file updated after every record; off to stop")
+	days := fs.Int("days", 7, "digest: how many days back")
+	remindDays := fs.Int("remind-days", 3, "notify: remind about changes unrecorded this many days; 0 never")
+	noDigest := fs.Bool("no-digest", false, "notify: no weekly digest")
 	grep := fs.String("grep", "", "log: only entries that mention this text")
 	agentName := fs.String("agent", "", "agent for suggest; default: Omarchy's default agent")
 	by := fs.String("by", defaultAuthor(), "who made the change, for example an agent name")
@@ -167,6 +176,27 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			return errors.New("ignore takes one path")
 		}
 		return s.Ignore(args[0])
+	case "digest":
+		history, err := s.History()
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		text := Digest(history, now.AddDate(0, 0, -*days), now)
+		if text == "" {
+			text = fmt.Sprintf("Nothing recorded in the last %d days.", *days)
+		}
+		fmt.Fprintln(stdout, text)
+		return nil
+	case "notify":
+		if !s.Initialized() {
+			return ErrNotInitialized
+		}
+		due, err := s.Notify(time.Now(), *remindDays, !*noDigest)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(stdout).Encode(append([]Notification{}, due...))
 	case "log":
 		return printLog(s, stdout, *grep, *asJSON)
 	case "apply":
@@ -331,6 +361,8 @@ type statusJSON struct {
 	AutoExport  string       `json:"autoExport"` // file kept in sync, if any
 	Version     string       `json:"version"`
 	Backup      *PushStatus  `json:"backup,omitempty"`
+	// OldestPending is when the oldest unrecorded change was made, if known.
+	OldestPending *time.Time `json:"oldestPending,omitempty"`
 }
 
 func status(s *Store, w io.Writer, asJSON bool) error {
@@ -347,6 +379,9 @@ func status(s *Store, w io.Writer, asJSON bool) error {
 		}
 		s.Attribute(pending)
 		out.Count = len(pending)
+		if t := s.OldestPending(pending); !t.IsZero() {
+			out.OldestPending = &t
+		}
 		out.Pending = Groups(pending)
 		history, err := s.History()
 		if err != nil {

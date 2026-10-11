@@ -18,6 +18,10 @@ Item {
   property string exportPath: ""
   property string autoExport: ""    // file the CLI keeps in sync, if any
   property var backup: null         // {remote, time, error} when a backup remote is set
+  property int remindDays: 3        // 0: no reminders
+  property bool weeklyDigest: true
+  property int pendingDays: 0       // age of the oldest unrecorded change
+  readonly property bool overdue: count > 0 && remindDays > 0 && pendingDays >= remindDays
 
   property bool initialized: true
   property var pending: []      // groups: {key, title, changes: [...]}
@@ -227,6 +231,7 @@ Item {
         root.autoExport = s.autoExport || ""
         root.version = s.version || "0.0.0"
         root.backup = s.backup || null
+        root.pendingDays = s.oldestPending ? Math.floor((Date.now() - Date.parse(s.oldestPending)) / 86400000) : 0
         // The shown diff follows the files: reload it when anything changed.
         if (changed && root.diffKey !== "") {
           var still = root.pending.some(function(g) { return g.key === root.diffKey })
@@ -248,6 +253,33 @@ Item {
       if (exitCode !== 0) { root.failure(exportErr.text); return }
       root.notice = "Exported to " + path
       Qt.openUrlExternally("file://" + path)
+    }
+  }
+
+  // Reminders and the weekly digest: the CLI says what is due and remembers
+  // what it sent, so restarts and several bars never notify twice.
+  Timer {
+    interval: 60 * 1000 // the first check waits for settings and login to settle
+    running: true
+    repeat: true
+    onTriggered: {
+      interval = 3600 * 1000
+      if (root.missing || !root.initialized || notifyProcess.running) return
+      notifyProcess.command = [root.binary, "notify", "--remind-days", String(root.remindDays)].concat(root.weeklyDigest ? [] : ["--no-digest"])
+      notifyProcess.running = true
+    }
+  }
+
+  Process {
+    id: notifyProcess
+    stdout: StdioCollector { id: notifyOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) return
+      try {
+        JSON.parse(notifyOut.text).forEach(function(n) {
+          Quickshell.execDetached(["notify-send", "-a", "System changes", "-i", "document-open-recent", "--", n.summary, n.body])
+        })
+      } catch (e) {}
     }
   }
 

@@ -37,6 +37,8 @@ BarWidget {
     if (!source) return
     source.binary = String(setting("binary", "syschange")).replace(/^~(?=\/)/, Quickshell.env("HOME"))
     source.intervalSec = Number(setting("refreshIntervalSec", 30))
+    source.remindDays = Number(setting("remindDays", 3))
+    source.weeklyDigest = setting("weeklyDigest", true) !== false
     source.exportPath = String(setting("exportPath", "~/Documents/System changes.md")).replace(/^~(?=\/)/, Quickshell.env("HOME"))
   }
 
@@ -61,11 +63,12 @@ BarWidget {
     active: root.opened
     // nf-md-history
     text: root.count > 0 ? "󰋚 " + root.count : "󰋚"
-    foreground: root.error !== "" ? Color.urgent : root.count > 0 ? Color.accent : (root.bar ? root.bar.barForeground : Color.foreground)
+    foreground: root.error !== "" || (root.source && root.source.overdue) ? Color.urgent : root.count > 0 ? Color.accent : (root.bar ? root.bar.barForeground : Color.foreground)
     dimmed: root.count === 0 && root.error === ""
     tooltipText: root.source && root.source.missing ? "System changes: click to install"
       : root.error !== "" ? "System changes: " + root.error
       : root.count === 0 ? "System changes: everything is recorded"
+      : root.source && root.source.overdue ? "System changes: " + root.count + " new, waiting " + root.source.pendingDays + " days to be described"
       : "System changes: " + root.count + " new, click to describe or undo"
     onPressed: root.togglePanel()
   }

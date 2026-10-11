@@ -90,6 +90,8 @@ Recorded 2 change(s).
 | `syschange remote [set URL\|off]` | back the history up to a private git repository |
 | `syschange push` | push now; it also happens by itself after every change |
 | `syschange apply [--yes] BACKUP` | bring a backed-up setup to this machine |
+| `syschange digest [--days N]` | sum up the last N days: apps, packages, services, who changed them |
+| `syschange notify [--remind-days N] [--no-digest]` | notifications due now, as JSON (the panel shows them) |
 | `syschange export [--to FILE]` | Markdown: history and setup steps |
 | `syschange export --auto FILE\|off` | keep FILE updated after every record |
 | `syschange agents [install\|remove]` | connect Claude Code and Codex |
@@ -114,6 +116,14 @@ When an update changes a file you had edited yourself, its entry says so ("Chang
 hypr/bindings.conf", and a `!` line in `syschange log`). **Keep mine** in the panel, or
 `syschange undo ENTRY hypr/bindings.conf`, takes the update's change back out of that file only, with a
 three-way merge: the rest of the update stays.
+
+## Reminders and digest
+
+When changes wait unrecorded for 3 days, the bar icon turns red and a notification says so, at most once
+a day. Once a week a notification sums up the week before: which apps' configs changed, what was installed
+or enabled, and by whom. Both are settings of the widget (**Remind after (days)**, 0 turns it off, and
+**Weekly digest**). Without the bar, run `syschange notify` from a timer and show its JSON however you like;
+`syschange digest` prints the summary any time.
 
 ## AI agents
 

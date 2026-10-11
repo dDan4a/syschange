@@ -32,7 +32,9 @@
     "defaults": {
       "binary": "syschange",
       "refreshIntervalSec": 30,
-      "exportPath": "~/Documents/System changes.md"
+      "exportPath": "~/Documents/System changes.md",
+      "remindDays": 3,
+      "weeklyDigest": true
     },
     "schema": [
       {
@@ -57,6 +59,23 @@
         "label": "Markdown export file",
         "defaultValue": "~/Documents/System changes.md",
         "description": "Where the export button writes the history. To keep a file updated after every change: syschange export --auto FILE."
+      },
+      {
+        "key": "remindDays",
+        "type": "integer",
+        "label": "Remind after (days)",
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "defaultValue": 3,
+        "description": "Changes left unrecorded this long turn the icon red and send a notification, at most once a day. 0 turns it off."
+      },
+      {
+        "key": "weeklyDigest",
+        "type": "boolean",
+        "label": "Weekly digest",
+        "defaultValue": true,
+        "description": "Once a week, a notification sums up what changed in your setup the week before."
       }
     ]
   },

@@ -18,7 +18,7 @@ import (
 )
 
 // version is the CLI release; the Omarchy plugin asks for at least its own.
-const version = "0.1.1"
+const version = "0.2.0"
 
 const usage = `syschange keeps a history of changes to your system setup.
 

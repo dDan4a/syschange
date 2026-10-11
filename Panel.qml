@@ -26,7 +26,7 @@ Panel {
   property string armed: ""        // destructive action waiting for a second click: "revert:<id>", "ignore:<group>", "undo:<entry>"
 
   function open() { root.selected = 0; root.editingKey = ""; root.controller.show() }
-  function close() { root.editingKey = ""; root.controller.hide() }
+  function close() { root.editingKey = ""; if (root.searching) root.closeSearch(); root.controller.hide() }
   function toggle() { root.opened ? root.close() : root.open() }
   function switchPanel(direction) {
     if (root.bar && typeof root.bar.switchPanelFrom === "function")
@@ -39,7 +39,7 @@ Panel {
   function describe(group, text) {
     if (!group) return
     editingKey = group.key
-    Qt.callLater(function() { noteField.text = text || ""; noteField.forceActiveFocus(); noteField.selectAll() })
+    Qt.callLater(function() { var f = noteLoader.item; if (f) { f.text = text || ""; f.forceActiveFocus(); f.selectAll() } })
   }
 
   // Only the panel that asked (one per monitor) shows the answer, and it
@@ -67,24 +67,24 @@ Panel {
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
   }
   function commitDescribe() {
-    var text = noteField.text.trim()
+    var text = noteLoader.item ? noteLoader.item.text.trim() : ""
     if (source && editingKey === "@checkpoint") source.checkpoint(text)
     else if (text !== "" && source) source.note(editingKey, text)
     cancelDescribe()
   }
   function openSearch() {
     searching = true
-    Qt.callLater(function() { searchField.forceActiveFocus(); searchField.selectAll() })
+    Qt.callLater(function() { var f = searchLoader.item; if (f) { f.forceActiveFocus(); f.selectAll() } })
   }
   function closeSearch() {
     searching = false
-    searchField.text = ""
+    searchDelay.stop()
     if (source) source.search("")
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
   }
   function newCheckpoint() {
     editingKey = "@checkpoint"
-    Qt.callLater(function() { noteField.text = ""; noteField.forceActiveFocus() })
+    Qt.callLater(function() { var f = noteLoader.item; if (f) { f.text = ""; f.forceActiveFocus() } })
   }
 
   // Destructive actions take two clicks: the first arms, the second runs.
@@ -171,7 +171,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: root.editingKey !== "" || searchField.activeFocus
+      blocked: root.editingKey !== "" || (searchLoader.item !== null && searchLoader.item.activeFocus)
       onMoveRequested: function(dx, dy) {
         if (root.groups.length === 0) return
         root.selected = Math.max(0, Math.min(root.groups.length - 1, root.selected + dy))
@@ -483,13 +483,15 @@ Panel {
             }
           }
 
-          Row {
-            visible: root.editingKey !== ""
+          // Text fields exist only while typing: a live TextField reads the clipboard on every change
+          // (to know whether it could paste), even hidden, and a hostile clipboard owner can stall the shell.
+          Loader {
+            id: noteLoader
+            active: root.editingKey !== ""
+            visible: active
             width: parent.width
-            spacing: Style.space(6)
-            TextField {
-              id: noteField
-              width: parent.width
+            sourceComponent: TextField {
+              width: noteLoader.width
               placeholderText: root.editingKey === "@checkpoint" ? "Checkpoint name, for example: before new animations (empty: date)" : "Why? For example: voice typing on Super+R"
               foreground: root.foreground
               font.family: root.fontFamily
@@ -547,19 +549,27 @@ Panel {
             }
           }
 
-          TextField {
-            id: searchField
-            visible: root.searching
+          Loader {
+            id: searchLoader
+            active: root.searching
+            visible: active
             width: parent.width
-            placeholderText: "Search: waybar, Super+R, docker…"
-            foreground: root.foreground
-            font.family: root.fontFamily
-            onTextChanged: searchDelay.restart()
-            Keys.onPressed: function(event) {
-              if (event.key === Qt.Key_Escape) { root.closeSearch(); event.accepted = true }
-              else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { keyCatcher.forceActiveFocus(); event.accepted = true }
+            sourceComponent: TextField {
+              width: searchLoader.width
+              placeholderText: "Search: waybar, Super+R, docker…"
+              foreground: root.foreground
+              font.family: root.fontFamily
+              onTextChanged: searchDelay.restart()
+              Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Escape) { root.closeSearch(); event.accepted = true }
+                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { keyCatcher.forceActiveFocus(); event.accepted = true }
+              }
             }
-            Timer { id: searchDelay; interval: 250; onTriggered: if (root.source) root.source.search(searchField.text.trim()) }
+          }
+          Timer {
+            id: searchDelay
+            interval: 250
+            onTriggered: if (root.source && searchLoader.item) root.source.search(searchLoader.item.text.trim())
           }
 
           Text {

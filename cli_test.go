@@ -121,7 +121,7 @@ func TestCLIRecordFlow(t *testing.T) {
 			entry = e
 		}
 	}
-	c.fails("undo takes one", "undo")
+	c.fails("undo takes a history entry", "undo")
 	must(t, c.ok("undo", entry.Commit), "Undid 1 config change(s)")
 	must(t, c.ok("log"), "(undone)")
 	c.fails("no history entry", "undo", "ffffffff")

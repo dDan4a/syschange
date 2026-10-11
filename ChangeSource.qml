@@ -99,7 +99,7 @@ Item {
   function skip(key) { act(["skip", key]) }
   function revert(id) { act(["revert", id]) }
   function ignore(path) { act(["ignore", path]) }
-  function undo(entryTime) { act(["undo", entryTime]) }
+  function undo(entryTime, paths) { act(["undo", entryTime].concat(paths || [])) }
   // Exports to the file kept in sync if there is one, else to the configured
   // path, then opens it.
   function exportMarkdown() {

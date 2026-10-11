@@ -735,3 +735,41 @@ func TestApplyFromBackup(t *testing.T) {
 		t.Fatalf("second plan not empty: %+v", again)
 	}
 }
+
+func TestOmarchyTouchedYourFiles(t *testing.T) {
+	s, _ := newTestStore(t)
+	write(t, s.ConfigDir, "hypr/bindings.conf", "bind = SUPER, Q, killactive\nbind = SUPER, R, exec, voxtype\n")
+	if _, err := s.Record(nil, "Voice typing", ""); err != nil {
+		t.Fatal(err)
+	}
+	// An update rewrites your bindings and adds a file of its own.
+	write(t, s.ConfigDir, "hypr/bindings.conf", "bind = SUPER, Q, killactive\nbind = SUPER, W, close\n")
+	write(t, s.ConfigDir, "waybar/config.jsonc", "{}\n")
+	update, err := s.Record(nil, "Omarchy update to 3.9", "omarchy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, _ := s.History()
+	if !slices.Equal(h[0].Touched, []string{"hypr/bindings.conf"}) {
+		t.Fatalf("touched %v", h[0].Touched)
+	}
+	if _, _, err := s.Undo(update.Commit, "", "kitty/kitty.conf"); err == nil {
+		t.Fatal("a file outside the entry must be refused")
+	}
+	if _, _, err := s.Undo(update.Commit, "", "hypr/bindings.conf"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(s.ConfigDir, "hypr/bindings.conf")); !strings.Contains(string(b), "voxtype") || strings.Contains(string(b), "SUPER, W") {
+		t.Fatalf("your bindings are not back:\n%s", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(s.ConfigDir, "waybar/config.jsonc")); string(b) != "{}\n" {
+		t.Fatal("the update's other files must stay")
+	}
+	h, _ = s.History()
+	if h[1].Note != "Omarchy update to 3.9" || len(h[1].Touched) != 0 || h[1].Undone {
+		t.Fatalf("after keeping yours: %+v", h[1])
+	}
+	if !strings.Contains(h[0].Note, "(hypr/bindings.conf)") {
+		t.Fatalf("undo note %q", h[0].Note)
+	}
+}

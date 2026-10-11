@@ -17,14 +17,17 @@ import (
 
 // Entry is one recorded set of changes, with the reason behind it.
 type Entry struct {
-	Time    time.Time `json:"time"`
-	Note    string    `json:"note,omitempty"` // empty when the user skipped describing it
-	By      string    `json:"by,omitempty"`   // who recorded it: an agent name, empty for the user
-	Commit  string    `json:"commit,omitempty"`
-	Title   string    `json:"title"`            // the apps it touched: "Hyprland, Packages"
-	Undoes  string    `json:"undoes,omitempty"` // ID of the entry this one undid
-	Undone  bool      `json:"undone,omitempty"` // computed: a later entry undid this one
-	Changes []Change  `json:"changes"`
+	Time   time.Time `json:"time"`
+	Note   string    `json:"note,omitempty"` // empty when the user skipped describing it
+	By     string    `json:"by,omitempty"`   // who recorded it: an agent name, empty for the user
+	Commit string    `json:"commit,omitempty"`
+	Title  string    `json:"title"`            // the apps it touched: "Hyprland, Packages"
+	Undoes string    `json:"undoes,omitempty"` // ID of the entry this one undid
+	Undone bool      `json:"undone,omitempty"` // computed: a later entry undid this one
+	// Touched (computed, Omarchy entries only) lists the files this entry
+	// changed that you had edited before, and have not taken back since.
+	Touched []string `json:"touched,omitempty"`
+	Changes []Change `json:"changes"`
 }
 
 // Record accepts the selected pending changes into the history.
@@ -143,14 +146,24 @@ func (s *Store) History() ([]Entry, error) {
 		}
 		entries = append(entries, e)
 	}
-	undone := map[string]bool{}
+	undoneFiles := map[string][]string{} // entry ID -> its files undone later
 	for _, e := range entries {
 		if e.Undoes != "" {
-			undone[e.Undoes] = true
+			undoneFiles[e.Undoes] = append(undoneFiles[e.Undoes], e.configFiles()...)
 		}
 	}
-	for i := range entries {
-		entries[i].Undone = undone[entries[i].ID()]
+	edited := map[string]bool{} // files you (or your agents) changed so far
+	for i, e := range entries {
+		files, back := e.configFiles(), undoneFiles[e.ID()]
+		entries[i].Undone = len(files) > 0 && !slices.ContainsFunc(files, func(f string) bool { return !slices.Contains(back, f) })
+		for _, f := range files {
+			switch {
+			case e.By != "omarchy":
+				edited[f] = true
+			case edited[f] && !slices.Contains(back, f):
+				entries[i].Touched = append(entries[i].Touched, f)
+			}
+		}
 	}
 	slices.Reverse(entries)
 	return entries, sc.Err()
@@ -186,6 +199,16 @@ func (e Entry) mentions(q string) bool {
 	return strings.Contains(strings.ToLower(strings.Join(text, "\n")), q)
 }
 
+func (e Entry) configFiles() []string {
+	var files []string
+	for _, c := range e.Changes {
+		if c.Kind == "config" {
+			files = append(files, c.Name)
+		}
+	}
+	return files
+}
+
 // ID identifies an entry: its time, which is unique in practice and also what
 // the JSON shows.
 func (e Entry) ID() string { return e.Time.Format(time.RFC3339Nano) }
@@ -193,8 +216,9 @@ func (e Entry) ID() string { return e.Time.Format(time.RFC3339Nano) }
 // Undo reverses a recorded entry: its config changes are taken back out of the
 // files and the result is recorded as a new entry. Later edits to the same
 // lines make it fail rather than overwrite them. Packages and services need
-// root, so their commands come back as hint.
-func (s *Store) Undo(id, by string) (Entry, string, error) {
+// root, so their commands come back as hint. With only, just those files of
+// the entry are taken back: say, the ones an Omarchy update changed under you.
+func (s *Store) Undo(id, by string, only ...string) (Entry, string, error) {
 	history, err := s.History()
 	if err != nil {
 		return Entry{}, "", err
@@ -214,7 +238,7 @@ func (s *Store) Undo(id, by string) (Entry, string, error) {
 	}
 	var manual []string
 	for _, c := range target.Changes {
-		if c.Kind != "config" {
+		if c.Kind != "config" && len(only) == 0 {
 			manual = append(manual, undoCommand(c))
 		}
 	}
@@ -230,6 +254,14 @@ func (s *Store) Undo(id, by string) (Entry, string, error) {
 		return Entry{}, "", err
 	}
 	paths := splitNul(names)
+	if len(only) > 0 {
+		for _, p := range only {
+			if !slices.Contains(paths, p) {
+				return Entry{}, "", fmt.Errorf("%s is not part of this entry", p)
+			}
+		}
+		paths = only
+	}
 	// Merge every file first and write only when all of them merge cleanly.
 	merged := map[string][]byte{} // nil means delete the file
 	links := map[string]bool{}    // restore as a symlink with this target
@@ -257,6 +289,9 @@ func (s *Store) Undo(id, by string) (Entry, string, error) {
 	note := target.Note
 	if note == "" {
 		note = target.Title
+	}
+	if len(only) > 0 {
+		note += " (" + strings.Join(only, ", ") + ")"
 	}
 	e, err := s.record(paths, "Undo: "+note, by, target.ID())
 	return e, hint, err

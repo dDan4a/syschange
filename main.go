@@ -38,7 +38,8 @@ Usage:
   syschange checkpoint [NAME]          save the whole setup now, unrecorded edits included
   syschange checkpoints                list them
   syschange restore NAME               bring config files back to a checkpoint
-  syschange undo ENTRY                 undo a recorded entry (its commit, or time from status --json)
+  syschange undo ENTRY [PATH...]       undo a recorded entry (its commit, or time from status --json),
+                                       or only these files of it
   syschange remote [set URL | off]     back the history up to a private git repository
   syschange push                       push now (it happens by itself after every change)
   syschange apply [--yes] BACKUP       bring a backed-up setup to this machine: files, packages, services
@@ -259,10 +260,10 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		return s.Export(stdout)
 	case "undo":
-		if len(args) != 1 {
-			return errors.New("undo takes one history entry: its time (see status --json) or commit")
+		if len(args) == 0 {
+			return errors.New("undo takes a history entry: its time (see status --json) or commit")
 		}
-		e, hint, err := s.Undo(args[0], *by)
+		e, hint, err := s.Undo(args[0], *by, args[1:]...)
 		if err != nil {
 			return err
 		}
@@ -476,6 +477,10 @@ func printLog(s *Store, w io.Writer, grep string, asJSON bool) error {
 			note += "  (undone)"
 		}
 		fmt.Fprintf(w, "%s  %s  %s\n", e.Time.Format("2006-01-02 15:04"), e.Commit, note)
+		if len(e.Touched) > 0 {
+			fmt.Fprintf(w, "    ! changed files you had edited: %s (keep yours: syschange undo %s %s)\n",
+				strings.Join(e.Touched, " "), e.Commit, strings.Join(e.Touched, " "))
+		}
 		for _, c := range e.Changes {
 			fmt.Fprintf(w, "    %s %s\n", opSign(c.Op), c.ID)
 		}

@@ -106,6 +106,8 @@ Panel {
 
   function restoreCheckpoint(cp) { confirm("restore:" + cp.commit, function() { root.source.restore(cp.commit) }) }
   function undoEntry(entry) { confirm("undo:" + entry.time, function() { root.source.undo(entry.time) }) }
+  // An Omarchy update changed files you had edited: take its change back out of just those.
+  function keepMine(entry) { confirm("keep:" + entry.time, function() { root.source.undo(entry.time, entry.touched) }) }
 
   // Who wrote the entry, or else which agents made its changes.
   function entryAuthor(e) {
@@ -616,6 +618,34 @@ Panel {
                   font.strikeout: entryItem.modelData.undone === true
                   elide: Text.ElideRight
                   textFormat: Text.PlainText
+                }
+                Item {
+                  readonly property bool armed: root.armed === "keep:" + entryItem.modelData.time
+                  visible: (entryItem.modelData.touched || []).length > 0
+                  width: parent.width
+                  height: visible ? Math.max(touchedText.implicitHeight, keepButton.implicitHeight) : 0
+                  Text {
+                    id: touchedText
+                    anchors.left: parent.left
+                    anchors.right: keepButton.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: parent.armed ? "Click again to bring your version back"
+                      : "Changed your edits: " + (entryItem.modelData.touched || []).join(", ")
+                    color: Color.urgent
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideMiddle
+                    textFormat: Text.PlainText
+                  }
+                  PanelActionButton {
+                    id: keepButton
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    iconText: "󰦛" // nf-md-restore
+                    tooltipText: "Keep mine: undo the update in these files only, your other edits and its other changes stay"
+                    foreground: parent.armed ? Color.urgent : root.foreground
+                    onClicked: root.keepMine(entryItem.modelData)
+                  }
                 }
                 Text {
                   width: parent.width

@@ -82,8 +82,8 @@ Recorded 2 change(s).
 | `syschange diff [ID...]` | what changed in config files |
 | `syschange revert ID...` | undo config changes; prints the `sudo` command for packages and services |
 | `syschange ignore PATH` | never track this path |
-| `syschange log` | the history |
-| `syschange undo ENTRY` | undo a recorded entry (commit from `log`, or its time) |
+| `syschange log [--grep TEXT]` | the history; with `--grep`, the entries whose description, files, packages or diff mention TEXT |
+| `syschange undo ENTRY [PATH...]` | undo a recorded entry (commit from `log`, or its time), or only some of its files |
 | `syschange checkpoint [NAME]` | save the whole setup now |
 | `syschange checkpoints` | list checkpoints |
 | `syschange restore NAME` | bring config files back to a checkpoint; prints the `sudo` commands for packages and services |
@@ -99,7 +99,7 @@ or a group (`packages`, `services`). No ID means everything.
 
 In the bar panel: `↑↓` select, `Enter` describe, `a` describe with AI, `s` keep without a description,
 `o` (or a click on the app) shows the diff right in the panel, `v` opens it in a terminal, `c` checkpoint,
-`m` export to Markdown and open it, `r` refresh.
+`m` export to Markdown and open it, `/` search the history, `r` refresh.
 Each line can be undone or ignored; each history entry can be undone. Undo and "stop tracking an app"
 ask for a second click.
 
@@ -109,6 +109,11 @@ On Omarchy, `syschange init` adds `syschange.hook` to `~/.config/omarchy/hooks/{
 When Omarchy updates itself or switches a theme or font, the hook records what that command changed
 (files modified and packages installed since it started) as one entry by `omarchy`. Your own pending
 changes are left alone. Run `syschange init` again to restore the hooks if you deleted them.
+
+When an update changes a file you had edited yourself, its entry says so ("Changed your edits:
+hypr/bindings.conf", and a `!` line in `syschange log`). **Keep mine** in the panel, or
+`syschange undo ENTRY hypr/bindings.conf`, takes the update's change back out of that file only, with a
+three-way merge: the rest of the update stays.
 
 ## AI agents
 

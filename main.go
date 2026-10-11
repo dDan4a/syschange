@@ -33,7 +33,8 @@ Usage:
   syschange diff [--color] [ID...]     show what changed in config files
   syschange revert ID...               undo config changes
   syschange ignore PATH                never track PATH (a gitignore pattern)
-  syschange log                        show the history
+  syschange log [--grep TEXT] [--json] show the history, or the entries that mention TEXT
+                                       in their description, files, packages or diff
   syschange checkpoint [NAME]          save the whole setup now, unrecorded edits included
   syschange checkpoints                list them
   syschange restore NAME               bring config files back to a checkpoint
@@ -83,6 +84,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	quiet := fs.Bool("quiet", false, "push: print nothing")
 	exportTo := fs.String("to", "", "export: write to this file instead of stdout")
 	autoExport := fs.String("auto", "", "export: keep this file updated after every record; off to stop")
+	grep := fs.String("grep", "", "log: only entries that mention this text")
 	agentName := fs.String("agent", "", "agent for suggest; default: Omarchy's default agent")
 	by := fs.String("by", defaultAuthor(), "who made the change, for example an agent name")
 	if err := fs.Parse(args); err != nil {
@@ -165,7 +167,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		return s.Ignore(args[0])
 	case "log":
-		return printLog(s, stdout)
+		return printLog(s, stdout, *grep, *asJSON)
 	case "apply":
 		if len(args) != 1 {
 			return errors.New("usage: syschange apply [--yes] URL-or-path-of-a-backup")
@@ -454,10 +456,13 @@ func agentsCmd(args []string, w io.Writer) error {
 	return fmt.Errorf("unknown agents action %q: use install, remove or status", action)
 }
 
-func printLog(s *Store, w io.Writer) error {
-	history, err := s.History()
+func printLog(s *Store, w io.Writer, grep string, asJSON bool) error {
+	history, err := s.Search(grep)
 	if err != nil {
 		return err
+	}
+	if asJSON {
+		return json.NewEncoder(w).Encode(append([]Entry{}, history...))
 	}
 	for _, e := range history {
 		note := e.Note

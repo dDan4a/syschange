@@ -100,6 +100,19 @@ func TestCLIRecordFlow(t *testing.T) {
 	must(t, log, "Voice typing  [codex]")
 	must(t, log, "(no description)")
 
+	// search: by description, by author, by a line of the diff (any case), as JSON
+	if out := c.ok("log", "--grep", "voice"); !strings.Contains(out, "Voice typing") || strings.Contains(out, "no description") {
+		t.Fatalf("grep voice:\n%s", out)
+	}
+	must(t, c.ok("log", "--grep", "codex"), "Voice typing")
+	must(t, c.ok("log", "--grep", "VOXTYPE"), "Voice typing")
+	if out := c.ok("log", "--grep", "font_size"); !strings.Contains(out, "no description") || strings.Contains(out, "Voice") {
+		t.Fatalf("grep diff line:\n%s", out)
+	}
+	if out := c.ok("log", "--json", "--grep", "nothing like it"); strings.TrimSpace(out) != "[]" {
+		t.Fatalf("no match must be []: %q", out)
+	}
+
 	// undo by commit, then the log shows it undone
 	var entry Entry
 	h, _ := c.s.History()

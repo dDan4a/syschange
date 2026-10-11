@@ -19,6 +19,8 @@ Panel {
 
   readonly property var groups: source ? source.pending : []
   readonly property var history: source ? source.history : []
+  property bool searching: false
+  readonly property var shownHistory: searching && source && source.query !== "" ? source.found : history
   property int selected: 0
   property string editingKey: ""   // group being described
   property string armed: ""        // destructive action waiting for a second click: "revert:<id>", "ignore:<group>", "undo:<entry>"
@@ -69,6 +71,16 @@ Panel {
     if (source && editingKey === "@checkpoint") source.checkpoint(text)
     else if (text !== "" && source) source.note(editingKey, text)
     cancelDescribe()
+  }
+  function openSearch() {
+    searching = true
+    Qt.callLater(function() { searchField.forceActiveFocus(); searchField.selectAll() })
+  }
+  function closeSearch() {
+    searching = false
+    searchField.text = ""
+    if (source) source.search("")
+    Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
   }
   function newCheckpoint() {
     editingKey = "@checkpoint"
@@ -157,7 +169,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: root.editingKey !== ""
+      blocked: root.editingKey !== "" || searchField.activeFocus
       onMoveRequested: function(dx, dy) {
         if (root.groups.length === 0) return
         root.selected = Math.max(0, Math.min(root.groups.length - 1, root.selected + dy))
@@ -172,6 +184,7 @@ Panel {
         if (key === "r") root.source.refresh()
         else if (key === "c") root.newCheckpoint()
         else if (key === "m") root.source.exportMarkdown()
+        else if (key === "/") root.openSearch()
         else if (!g) return
         else if (key === "d") root.describe(g)
         else if (key === "s") root.source.skip(g.key)
@@ -499,6 +512,15 @@ Panel {
               fontFamily: root.fontFamily
             }
             PanelActionButton {
+              id: searchButton
+              anchors.right: backupButton.visible ? backupButton.left : exportButton.left
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "󰍉" // nf-md-magnify
+              tooltipText: "Search the history (/): descriptions, files, packages and diffs"
+              foreground: root.searching ? Color.accent : root.foreground
+              onClicked: root.searching ? root.closeSearch() : root.openSearch()
+            }
+            PanelActionButton {
               id: backupButton
               readonly property var b: root.source ? root.source.backup : null
               visible: b !== null
@@ -522,6 +544,33 @@ Panel {
             }
           }
 
+          TextField {
+            id: searchField
+            visible: root.searching
+            width: parent.width
+            placeholderText: "Search: waybar, Super+R, docker…"
+            foreground: root.foreground
+            font.family: root.fontFamily
+            onTextChanged: searchDelay.restart()
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Escape) { root.closeSearch(); event.accepted = true }
+              else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { keyCatcher.forceActiveFocus(); event.accepted = true }
+            }
+            Timer { id: searchDelay; interval: 250; onTriggered: if (root.source) root.source.search(searchField.text.trim()) }
+          }
+
+          Text {
+            visible: root.searching && root.source !== null && root.source.query !== "" && root.shownHistory.length === 0
+            width: parent.width
+            text: "Nothing in the history mentions “" + (root.source ? root.source.query : "") + "”."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+          }
+
           Text {
             visible: root.source !== null && root.source.initialized && root.groups.length === 0 && root.history.length === 0
             width: parent.width
@@ -533,12 +582,12 @@ Panel {
           }
 
           ListView {
-            visible: root.history.length > 0
+            visible: root.shownHistory.length > 0
             width: parent.width
             height: Math.min(contentHeight, Style.space(260))
             clip: true
             spacing: Style.space(6)
-            model: root.history.slice(0, 30)
+            model: root.shownHistory.slice(0, 30)
             boundsBehavior: Flickable.StopAtBounds
 
             delegate: Item {
@@ -691,7 +740,7 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · s keep · o/v diff · c checkpoint · r refresh"
+            text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · s keep · o/v diff · / search · c checkpoint · r refresh"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

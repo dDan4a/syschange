@@ -156,6 +156,36 @@ func (s *Store) History() ([]Entry, error) {
 	return entries, sc.Err()
 }
 
+// Search returns the entries whose description, apps, author or changed
+// names contain q, or whose config diff adds or removes it. Case is ignored.
+func (s *Store) Search(q string) ([]Entry, error) {
+	history, err := s.History()
+	if err != nil || q == "" {
+		return history, err
+	}
+	var commits []string
+	if out, err := s.git(nil, "log", "--format=%H", "-i", "-S"+q); err == nil {
+		commits = strings.Fields(string(out))
+	}
+	q = strings.ToLower(q)
+	var found []Entry
+	for _, e := range history {
+		inDiff := e.Commit != "" && slices.ContainsFunc(commits, func(h string) bool { return strings.HasPrefix(h, e.Commit) })
+		if inDiff || e.mentions(q) {
+			found = append(found, e)
+		}
+	}
+	return found, nil
+}
+
+func (e Entry) mentions(q string) bool {
+	text := []string{e.Note, e.Title, e.By, e.Commit}
+	for _, c := range e.Changes {
+		text = append(text, c.ID, c.Label, c.By)
+	}
+	return strings.Contains(strings.ToLower(strings.Join(text, "\n")), q)
+}
+
 // ID identifies an entry: its time, which is unique in practice and also what
 // the JSON shows.
 func (e Entry) ID() string { return e.Time.Format(time.RFC3339Nano) }

@@ -37,6 +37,8 @@ Item {
   property string lastStatus: ""
   property bool busy: actionProcess.running
   property string suggestingKey: ""  // group an AI description is being written for
+  property string query: ""         // history search, empty when not searching
+  property var found: []            // entries matching query
 
   // A ready AI description for a group; the panel opens it for editing.
   signal suggested(string key, string text)
@@ -118,6 +120,14 @@ Item {
     suggestingKey = key
     suggestProcess.command = [binary, "suggest", key]
     suggestProcess.running = true
+  }
+
+  function search(q) {
+    query = q
+    searchProcess.running = false
+    if (q === "") { found = []; return }
+    searchProcess.command = [binary, "log", "--json", "--grep", q]
+    searchProcess.running = true
   }
 
   function showDiff(key) {
@@ -222,6 +232,7 @@ Item {
           var still = root.pending.some(function(g) { return g.key === root.diffKey })
           root.showDiff(still ? root.diffKey : "")
         }
+        if (changed && root.query !== "") root.search(root.query)
         root.statusError = ""
       } catch (e) {
         root.failure("unexpected output from syschange status")
@@ -237,6 +248,14 @@ Item {
       if (exitCode !== 0) { root.failure(exportErr.text); return }
       root.notice = "Exported to " + path
       Qt.openUrlExternally("file://" + path)
+    }
+  }
+
+  Process {
+    id: searchProcess
+    stdout: StdioCollector { id: searchOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      try { root.found = exitCode === 0 ? JSON.parse(searchOut.text) : [] } catch (e) { root.found = [] }
     }
   }
 

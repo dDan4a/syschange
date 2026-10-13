@@ -42,8 +42,8 @@ Panel {
     Qt.callLater(function() { var f = noteLoader.item; if (f) { f.text = text || ""; f.forceActiveFocus(); f.selectAll() } })
   }
 
-  // Only the panel that asked (one per monitor) shows the answer, and it
-  // reopens if it was closed while the agent was thinking.
+  // Only the panel that asked (one per monitor) saves the answer, straight away:
+  // an answer shown in the shared text field ended up under whatever group was selected by then.
   property string askedKey: ""
   function suggest(group) {
     if (!group || !root.source || root.source.suggestingKey !== "") return
@@ -55,11 +55,7 @@ Panel {
     function onSuggested(key, text) {
       if (key !== root.askedKey) return
       root.askedKey = ""
-      // Never replace what the user is typing for another group.
-      if (root.editingKey !== "" && root.editingKey !== key) return
-      if (!root.opened) root.open()
-      for (var i = 0; i < root.groups.length; i++)
-        if (root.groups[i].key === key) { root.selected = i; root.describe(root.groups[i], text); return }
+      if (text !== "") root.source.note(key, text)
     }
   }
   function cancelDescribe() {

@@ -23,7 +23,7 @@ diff and undo it.
 - **Quiet on Omarchy**: an `omarchy update`, a theme or a font switch is recorded by itself as one entry
   ("Theme: tokyo-night"), not dumped on you as dozens of changed files.
 - **Describe with AI**: one click (or `syschange suggest`) and your default agent reads the diff and
-  proposes the line, in your system language. You edit or accept it.
+  writes the line, in your system language, and saves it.
 - **You see which AI agent changed what**, even if it never says so. One click gives Claude Code, Codex,
   Gemini CLI and Grok a skill and hooks; an agent that changed your system records why before it finishes.
 - **Backup to your own git repository**: `syschange remote set git@github.com:you/setup.git` and every change

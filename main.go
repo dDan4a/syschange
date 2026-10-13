@@ -31,6 +31,9 @@ Usage:
   syschange skip [ID...]               record changes without a reason
   syschange suggest [--agent NAME] [ID...]
                                        ask an AI agent for a one-line description
+  syschange suggest --all [--send] [--agent NAME]
+                                       describe every app's changes with AI and record them;
+                                       --send shows the result as a notification
   syschange diff [--color] [ID...]     show what changed in config files
   syschange revert ID...               undo config changes
   syschange ignore PATH                never track PATH (a gitignore pattern)
@@ -93,10 +96,11 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	autoExport := fs.String("auto", "", "export: keep this file updated after every record; off to stop")
 	days := fs.Int("days", 7, "digest: how many days back")
 	remindDays := fs.Int("remind-days", 3, "notify: remind about changes unrecorded this many days; 0 never")
-	send := fs.Bool("send", false, "notify: show the notifications instead of printing them")
+	send := fs.Bool("send", false, "notify, suggest --all: show the notifications instead of printing them")
 	noDigest := fs.Bool("no-digest", false, "notify: no weekly digest")
 	grep := fs.String("grep", "", "log: only entries that mention this text")
 	agentName := fs.String("agent", "", "agent for suggest; default: Omarchy's default agent")
+	all := fs.Bool("all", false, "suggest: describe and record every pending group")
 	by := fs.String("by", defaultAuthor(), "who made the change, for example an agent name")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -159,6 +163,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		return nil
 	case "suggest":
+		if *all {
+			return suggestAll(s, stdout, *agentName, *send)
+		}
 		line, err := s.Suggest(args, *agentName)
 		if err != nil {
 			return err
@@ -333,6 +340,28 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return agentsCmd(args, stdout)
 	}
 	return fmt.Errorf("unknown command %q, see syschange help", cmd)
+}
+
+func suggestAll(s *Store, w io.Writer, agent string, send bool) error {
+	var lines strings.Builder
+	described, total, err := s.SuggestAll(agent, io.MultiWriter(w, &lines))
+	if err != nil {
+		return err
+	}
+	if total == 0 {
+		return errors.New("nothing to describe")
+	}
+	summary := fmt.Sprintf("Described %d of %d", described, total)
+	fmt.Fprintln(w, summary+".")
+	if send {
+		if err := sendNotification(Notification{Summary: summary, Body: strings.TrimSpace(lines.String())}); err != nil {
+			return err
+		}
+	}
+	if described == 0 {
+		return errors.New("no change could be described")
+	}
+	return nil
 }
 
 // defaultAuthor tags records made from inside an agent that marks its shell, without the agent

@@ -23,7 +23,7 @@ diff and undo it.
 - **Quiet on Omarchy**: an `omarchy update`, a theme or a font switch is recorded by itself as one entry
   ("Theme: tokyo-night"), not dumped on you as dozens of changed files.
 - **Describe with AI**: one click (or `syschange suggest`) and your default agent reads the diff and
-  writes the line, in your system language, and saves it.
+  writes the line, in your system language, and saves it. Or describe all pending changes at once.
 - **You see which AI agent changed what**, even if it never says so. One click gives Claude Code, Codex,
   Gemini CLI and Grok a skill and hooks; an agent that changed your system records why before it finishes.
 - **Backup to your own git repository**: `syschange remote set git@github.com:you/setup.git` and every change
@@ -79,6 +79,7 @@ Recorded 2 change(s).
 | `syschange note [--by NAME] TEXT [ID...]` | record changes with a reason |
 | `syschange skip [ID...]` | record changes without a reason |
 | `syschange suggest [--agent NAME] [ID...]` | ask an AI agent for the description |
+| `syschange suggest --all [--send]` | describe and record every app's changes with AI; `--send` notifies the result |
 | `syschange diff [ID...]` | what changed in config files |
 | `syschange revert ID...` | undo config changes; prints the `sudo` command for packages and services |
 | `syschange ignore PATH` | never track this path |
@@ -99,7 +100,7 @@ Recorded 2 change(s).
 An ID is a file inside `~/.config` (`hypr/bindings.lua`), an app directory (`hypr`), a package or unit name,
 or a group (`packages`, `services`). No ID means everything.
 
-In the bar panel: `↑↓` select, `Enter` describe, `a` describe with AI, `s` keep without a description,
+In the bar panel: `↑↓` select, `Enter` describe, `a` describe with AI, `A` describe all with AI, `s` keep without a description,
 `o` (or a click on the app) shows the diff right in the panel, `v` opens it in a terminal, `c` checkpoint,
 `m` export to Markdown and open it, `/` search the history, `r` refresh.
 Each line can be undone or ignored; each history entry can be undone. Undo and "stop tracking an app"
@@ -130,7 +131,8 @@ or enabled, and by whom. Both are settings of the widget (**Remind after (days)*
 ### Describe with AI
 
 `syschange suggest` runs Omarchy's default agent (`omarchy default agent`) once, without tools, on the diff of the
-pending changes and prints one line. Supported: Claude Code (Haiku), Codex, Gemini CLI, Grok; pick
+pending changes and prints one line. `syschange suggest --all` does it for each app (and packages, services) in turn
+and records every line right away, as written by that agent; an app that fails stays pending. Supported: Claude Code (Haiku), Codex, Gemini CLI, Grok; pick
 another with `--agent`. The diff goes to that agent's provider; files that look like secrets are never in it.
 
 ### Let agents record what they change

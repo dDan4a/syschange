@@ -40,7 +40,7 @@ Item {
   property var diffLines: []        // [{kind: "add"|"del"|"hunk"|"file"|"ctx", text}]
   property string lastStatus: ""
   property bool busy: actionProcess.running
-  property string suggestingKey: ""  // group an AI description is being written for
+  property string suggestingKey: ""  // group an AI description is being written for, "@all" for every group
   property string query: ""         // history search, empty when not searching
   property var found: []            // entries matching query
 
@@ -123,6 +123,13 @@ Item {
     if (suggestProcess.running) return
     suggestingKey = key
     suggestProcess.command = [binary, "suggest", key]
+    suggestProcess.running = true
+  }
+  // Describes and records every group; the CLI shows the result as a notification.
+  function suggestAll() {
+    if (suggestProcess.running) return
+    suggestingKey = "@all"
+    suggestProcess.command = [binary, "suggest", "--all", "--send"]
     suggestProcess.running = true
   }
 
@@ -296,7 +303,9 @@ Item {
     onExited: function(exitCode) {
       var key = root.suggestingKey
       root.suggestingKey = ""
+      if (key === "@all") root.refresh()
       if (exitCode !== 0) { root.failure(suggestErr.text || suggestOut.text); return }
+      if (key === "@all") return
       root.suggested(key, String(suggestOut.text || "").trim())
     }
   }

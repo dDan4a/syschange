@@ -275,6 +275,33 @@ func TestCLISuggest(t *testing.T) {
 	c.fails("nothing to describe", "suggest", "--agent", "grok", "nope")
 }
 
+func TestCLISuggestAll(t *testing.T) {
+	c := newCLI(t)
+	bin := t.TempDir()
+	// Fails on the Waybar group only: the others still get recorded.
+	os.WriteFile(filepath.Join(bin, "grok"), []byte("#!/bin/sh\ngrep -q Waybar \"$2\" && exit 1\necho 'AI line'\n"), 0o755)
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	c.fails("nothing to describe", "suggest", "--all", "--agent", "grok")
+	write(t, c.s.ConfigDir, "hypr/bindings.conf", "x\n")
+	write(t, c.s.ConfigDir, "mako/config", "x\n")
+	write(t, c.s.ConfigDir, "waybar/config", "x\n")
+	var shown []Notification
+	old := sendNotification
+	sendNotification = func(n Notification) error { shown = append(shown, n); return nil }
+	defer func() { sendNotification = old }()
+
+	out := c.ok("suggest", "--all", "--send", "--agent", "grok")
+	for _, want := range []string{"Hyprland: AI line", "Mako: AI line", "Waybar: failed", "Described 2 of 3."} {
+		must(t, out, want)
+	}
+	if len(shown) != 1 || shown[0].Summary != "Described 2 of 3" || !strings.Contains(shown[0].Body, "Mako: AI line") {
+		t.Fatalf("notification %+v", shown)
+	}
+	must(t, c.ok("log"), "AI line  [grok]")
+	must(t, c.ok("status"), "Waybar")
+	c.fails("no change could be described", "suggest", "--all", "--agent", "grok")
+}
+
 func TestCLINotInitialized(t *testing.T) {
 	dir := t.TempDir()
 	s := &Store{ConfigDir: dir, StateDir: filepath.Join(dir, "state"),

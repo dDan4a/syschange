@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,11 +33,7 @@ func (s *Store) Suggest(items []string, agent string) (string, error) {
 	if len(body) > maxDiff {
 		body = body[:maxDiff] + "\n[diff truncated]"
 	}
-	if agent == "" {
-		if agent = omarchyDefaultAgent(); agent == "" {
-			agent = "claude"
-		}
-	}
+	agent = pickAgent(agent)
 	prompt := fmt.Sprintf(`You label changes to a Linux desktop setup (Arch, Hyprland, Omarchy).
 Reply with ONE line of at most 80 characters that says what this change does for the user: its purpose, not file names.
 No quotes, no preamble, no trailing period. Write it in the language of the locale %q.
@@ -56,6 +53,41 @@ Changed: %s
 		return "", fmt.Errorf("%s returned no text", agent)
 	}
 	return line, nil
+}
+
+// SuggestAll describes every pending group with an agent and records it, one
+// group at a time, each entry by that agent. A group that fails stays pending
+// and the others go on. Each group's outcome is written to w.
+func (s *Store) SuggestAll(agent string, w io.Writer) (described, total int, err error) {
+	pending, err := s.Pending()
+	if err != nil {
+		return 0, 0, err
+	}
+	agent = pickAgent(agent)
+	groups := Groups(pending)
+	for _, g := range groups {
+		line, err := s.Suggest([]string{g.Key}, agent)
+		if err == nil {
+			_, err = s.Record([]string{g.Key}, line, agent)
+		}
+		if err != nil {
+			fmt.Fprintf(w, "%s: failed: %v\n", g.Title, err)
+			continue
+		}
+		fmt.Fprintf(w, "%s: %s\n", g.Title, line)
+		described++
+	}
+	return described, len(groups), nil
+}
+
+// pickAgent falls back to Omarchy's default agent, then to claude.
+func pickAgent(agent string) string {
+	if agent == "" {
+		if agent = omarchyDefaultAgent(); agent == "" {
+			agent = "claude"
+		}
+	}
+	return agent
 }
 
 // omarchyDefaultAgent is the agent the user picked in Omarchy (omarchy default

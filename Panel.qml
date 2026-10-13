@@ -179,7 +179,8 @@ Panel {
       onTextKey: function(text) {
         var key = text.toLowerCase(), g = root.current()
         if (!root.source) return
-        if (key === "r") root.source.refresh()
+        if (text === "A") { if (root.source.suggestingKey === "" && root.groups.length > 0) root.source.suggestAll() }
+        else if (key === "r") root.source.refresh()
         else if (key === "c") root.newCheckpoint()
         else if (key === "m") root.source.exportMarkdown()
         else if (key === "/") root.openSearch()
@@ -286,11 +287,29 @@ Panel {
             }
           }
 
-          PanelSectionHeader {
+          Item {
             visible: root.groups.length > 0
-            text: "New"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
+            width: parent.width
+            height: Math.max(newHeader.implicitHeight, describeAllButton.implicitHeight)
+            PanelSectionHeader {
+              id: newHeader
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "New"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+            PanelActionButton {
+              id: describeAllButton
+              readonly property bool working: root.source !== null && root.source.suggestingKey === "@all"
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: working ? "󰔟" : "󰁨" // nf-md-timer_sand / nf-md-auto_fix
+              tooltipText: working ? "Describing every change with AI…" : "Describe all with AI (A): your default agent describes each app's changes and saves them"
+              foreground: working ? Color.accent : root.foreground
+              enabled: root.source !== null && root.source.suggestingKey === ""
+              onClicked: root.source.suggestAll()
+            }
           }
 
           ListView {
@@ -772,7 +791,7 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · s keep · o/v diff · / search · c checkpoint · r refresh"
+            text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · A AI all · s keep · o/v diff · / search · c checkpoint · r refresh"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

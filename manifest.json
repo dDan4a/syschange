@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "dan4a.syschange",
   "name": "System Changes",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "author": "dDan4a",
   "license": "MIT",
   "description": "A history of changes to your setup: config files, packages and services. Describe each change in one line, see the diff, undo it with a click. Shows what your AI agents changed too.",

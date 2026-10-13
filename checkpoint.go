@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,9 +36,12 @@ func (s *Store) Checkpoint(name string) (Checkpoint, error) {
 	if err != nil {
 		return Checkpoint{}, err
 	}
-	var paths []string
+	var paths, home []string
 	for _, c := range pending {
-		if c.Kind == "config" {
+		switch {
+		case c.Kind == "config" && isHome(c.Name):
+			home = append(home, c.Name)
+		case c.Kind == "config":
 			paths = append(paths, c.Name)
 		}
 	}
@@ -52,6 +56,9 @@ func (s *Store) Checkpoint(name string) (Checkpoint, error) {
 		if _, err := s.gitEnv(env, nulJoin(paths), "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 			return Checkpoint{}, err
 		}
+	}
+	if err := s.stageHome(env, home); err != nil {
+		return Checkpoint{}, err
 	}
 	tree, err := s.gitEnv(env, nil, "write-tree")
 	if err != nil {
@@ -130,15 +137,47 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 		return "", err
 	}
 
-	// Files of the checkpoint come back; files it did not have go away.
-	if _, err := s.git(nil, "restore", "--source="+target.Commit, "--worktree", "--", "."); err != nil {
-		return "", err
-	}
+	// Files of the checkpoint come back; files it did not have go away. The
+	// paths are listed, as "." would also bring "~/" files into the config dir.
 	inTree, err := s.git(nil, "ls-tree", "-r", "--name-only", "-z", target.Commit)
 	if err != nil {
 		return "", err
 	}
 	keep := splitNul(inTree)
+	inIndex, err := s.git(nil, "ls-files", "-z")
+	if err != nil {
+		return "", err
+	}
+	var restore []string
+	seen := map[string]bool{}
+	for _, f := range append(slices.Clone(keep), splitNul(inIndex)...) {
+		if !isHome(f) && !seen[f] {
+			seen[f] = true
+			restore = append(restore, f)
+		}
+	}
+	if len(restore) > 0 {
+		if _, err := s.git(nulJoin(restore), "restore", "--source="+target.Commit, "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+			return "", err
+		}
+	}
+	// Tracked files under $HOME come back too; one the checkpoint did not have
+	// stays, as it may predate tracking it.
+	home, err := s.recorded(target.Commit)
+	if err != nil {
+		return "", err
+	}
+	tracked, err := s.trackedFiles()
+	if err != nil {
+		return "", err
+	}
+	for name, body := range home {
+		if current, ok := s.currentEntry(name); slices.Contains(tracked, name) && (!ok || !bytes.Equal(current, body)) {
+			if err := s.writeEntry(name, body, false); err != nil {
+				return "", err
+			}
+		}
+	}
 	extra, err := s.untracked()
 	if err != nil {
 		return "", err

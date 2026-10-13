@@ -12,7 +12,7 @@ import (
 )
 
 // A backup remote is any git URL (a private GitHub repo, a path on a USB
-// disk). It receives two branches: "config", the history of ~/.config, and
+// disk). It receives two branches: "config", the history of ~/.config and tracked files, and
 // "state", syschange's own files (journal, package and service lists,
 // checkpoints), plus the checkpoint refs. Secrets never reach it: they are
 // never in the history in the first place.
@@ -20,7 +20,7 @@ import (
 const backupRemote = "backup"
 
 // stateFiles are copied into the "state" branch when they exist.
-var stateFiles = []string{"journal.jsonl", "packages.txt", "packages.init.txt", "packages.aur.txt", "units.txt", "units.init.txt", "checkpoints.jsonl"}
+var stateFiles = []string{"journal.jsonl", "packages.txt", "packages.init.txt", "packages.aur.txt", "units.txt", "units.init.txt", "checkpoints.jsonl", "tracked.txt"}
 
 type PushStatus struct {
 	Remote string    `json:"remote"`

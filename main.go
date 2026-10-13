@@ -18,7 +18,7 @@ import (
 )
 
 // version is the CLI release; the Omarchy plugin asks for at least its own.
-const version = "0.2.1"
+const version = "0.3.0"
 
 const usage = `syschange keeps a history of changes to your system setup.
 
@@ -34,6 +34,9 @@ Usage:
   syschange diff [--color] [ID...]     show what changed in config files
   syschange revert ID...               undo config changes
   syschange ignore PATH                never track PATH (a gitignore pattern)
+  syschange track [FILE...]            also track these files under your home folder (~/.gitconfig),
+                                       or list the tracked ones
+  syschange untrack FILE...            stop tracking them
   syschange log [--grep TEXT] [--json] show the history, or the entries that mention TEXT
                                        in their description, files, packages or diff
   syschange checkpoint [NAME]          save the whole setup now, unrecorded edits included
@@ -57,7 +60,8 @@ Usage:
   syschange version                    print the version
 
 ID is a file path inside ~/.config (hypr/bindings.conf), an app directory (hypr),
-a package or unit name, or a group: packages, services. No ID means all changes.
+a tracked file (~/.gitconfig), a package or unit name, or a group: packages, services.
+No ID means all changes.
 `
 
 // newStore is swapped out in tests, so the CLI runs against a sandbox.
@@ -177,6 +181,20 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			return errors.New("ignore takes one path")
 		}
 		return s.Ignore(args[0])
+	case "track":
+		if len(args) > 0 {
+			return s.Track(args)
+		}
+		names, err := s.trackedFiles()
+		for _, n := range names {
+			fmt.Fprintln(stdout, n)
+		}
+		return err
+	case "untrack":
+		if len(args) == 0 {
+			return errors.New("untrack needs at least one file")
+		}
+		return s.Untrack(args)
 	case "digest":
 		history, err := s.History()
 		if err != nil {

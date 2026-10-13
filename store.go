@@ -18,6 +18,7 @@ import (
 type Store struct {
 	ConfigDir string // the tracked directory, normally ~/.config
 	StateDir  string // ~/.local/state/syschange
+	HomeDir   string // where files tracked with syschange track live; empty disables them
 
 	// Listers are swapped out in tests.
 	ListPackages func() ([]string, error)
@@ -36,7 +37,7 @@ func DefaultStore() (*Store, error) {
 		config = envOr("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	}
 	state := filepath.Join(envOr("XDG_STATE_HOME", filepath.Join(home, ".local", "state")), "syschange")
-	return &Store{ConfigDir: config, StateDir: state, ListPackages: pacmanExplicit, ListUnits: enabledUnits,
+	return &Store{ConfigDir: config, StateDir: state, HomeDir: home, ListPackages: pacmanExplicit, ListUnits: enabledUnits,
 		ListForeign: func() ([]string, error) { return foreignPackages(), nil }, SpawnPush: spawnPush}, nil
 }
 
@@ -169,6 +170,9 @@ func (s *Store) untracked() ([]string, error) {
 const maxFileSize = 256 << 10
 
 func (s *Store) trackable(rel string) bool {
+	if isHome(rel) { // a "~" directory in the config dir would clash with tracked home files
+		return false
+	}
 	full := filepath.Join(s.ConfigDir, rel)
 	info, err := os.Lstat(full)
 	if err != nil || info.Size() > maxFileSize {
@@ -180,19 +184,14 @@ func (s *Store) trackable(rel string) bool {
 	if !info.Mode().IsRegular() {
 		return false
 	}
-	head := make([]byte, 8000)
-	f, err := os.Open(full)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	n, _ := f.Read(head)
-	if bytes.Contains(head[:n], []byte{0}) {
-		return false
-	}
-	// The history must not become a second copy of your passwords.
 	body, err := os.ReadFile(full)
-	return err == nil && !looksSecret(body)
+	return err == nil && plainText(body)
+}
+
+// plainText is true for text that holds no secret: the history must not
+// become a second copy of your passwords.
+func plainText(body []byte) bool {
+	return !bytes.Contains(body[:min(len(body), 8000)], []byte{0}) && !looksSecret(body)
 }
 
 // looksSecret applies secretLike, minus settings that only name where secrets
@@ -249,48 +248,69 @@ func safePath(p string) bool {
 	return true
 }
 
-// writeEntry writes a file (or a symlink) inside the config directory. Through
-// os.Root, ".." and symlinked parent directories can never lead outside it, and
-// an existing symlink is replaced, never written through.
+// writeEntry writes a file (or a symlink) inside the config directory, or a
+// tracked file under $HOME ("~/" path, never a symlink). Through os.Root, ".."
+// and symlinked parent directories can never lead outside it, and an existing
+// symlink is replaced, never written through.
 func (s *Store) writeEntry(path string, body []byte, link bool) error {
-	if !safePath(path) {
-		return fmt.Errorf("refusing unsafe path %q", path)
+	dir, rel, err := s.rootFor(path)
+	if err != nil {
+		return err
 	}
-	root, err := os.OpenRoot(s.ConfigDir)
+	if link && dir == s.HomeDir {
+		return fmt.Errorf("refusing to make %s a symlink", path)
+	}
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
-	if err := root.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	perm := os.FileMode(0o755)
+	if dir == s.HomeDir {
+		perm = 0o700 // say ~/.claude: only you
+	}
+	if err := root.MkdirAll(filepath.Dir(rel), perm); err != nil {
 		return err
 	}
 	mode := os.FileMode(0o644)
-	if info, err := root.Lstat(path); err == nil && info.Mode().IsRegular() {
+	if info, err := root.Lstat(rel); err == nil && info.Mode().IsRegular() {
 		mode = info.Mode().Perm()
 	}
-	if err := root.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if link {
-		return root.Symlink(string(body), path)
+		return root.Symlink(string(body), rel)
 	}
-	return root.WriteFile(path, body, mode)
+	return root.WriteFile(rel, body, mode)
 }
 
-// removeEntry removes a file or symlink inside the config directory.
+// removeEntry removes a file or symlink inside the config directory, or a tracked file under $HOME.
 func (s *Store) removeEntry(path string) error {
-	if !safePath(path) {
-		return fmt.Errorf("refusing unsafe path %q", path)
+	dir, rel, err := s.rootFor(path)
+	if err != nil {
+		return err
 	}
-	root, err := os.OpenRoot(s.ConfigDir)
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
-	if err := root.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
+}
+
+// rootFor picks the directory a history path lives in and the path inside it.
+func (s *Store) rootFor(path string) (dir, rel string, err error) {
+	if rel, ok := strings.CutPrefix(path, homePrefix); ok {
+		return s.HomeDir, rel, s.homeAllowed(rel)
+	}
+	if !safePath(path) {
+		return "", "", fmt.Errorf("refusing unsafe path %q", path)
+	}
+	return s.ConfigDir, path, nil
 }
 
 // unsaved lists changed files that syschange cannot keep a copy of (secrets,
@@ -306,7 +326,13 @@ func (s *Store) unsaved() ([]string, error) {
 			paths = append(paths, p)
 		}
 	}
-	return paths, nil
+	names, err := s.trackedFiles()
+	for _, name := range names {
+		if _, ok, exists := s.homeContent(name); exists && !ok {
+			paths = append(paths, name)
+		}
+	}
+	return paths, err
 }
 
 // autoExclude excludes directories that look like browser or Electron

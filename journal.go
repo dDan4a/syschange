@@ -40,16 +40,19 @@ func (s *Store) record(items []string, note, by, undoes string) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
-	chosen := Select(pending, items)
+	chosen := Select(pending, s.canon(items))
 	if len(chosen) == 0 {
 		return Entry{}, errors.New("nothing to record: no pending change matches")
 	}
 	s.Attribute(chosen) // the history keeps which agent made each change
 	entry := Entry{Time: time.Now(), Note: strings.TrimSpace(note), By: by, Title: groupTitles(chosen), Undoes: undoes, Changes: chosen}
 
-	var paths []string
+	var paths, home []string
 	for _, c := range chosen {
-		if c.Kind == "config" {
+		switch {
+		case c.Kind == "config" && isHome(c.Name):
+			home = append(home, c.Name)
+		case c.Kind == "config":
 			paths = append(paths, c.Name)
 		}
 	}
@@ -57,6 +60,11 @@ func (s *Store) record(items []string, note, by, undoes string) (Entry, error) {
 		if _, err := s.git(nulJoin(paths), "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 			return Entry{}, err
 		}
+	}
+	if err := s.stageHome(nil, home); err != nil {
+		return Entry{}, err
+	}
+	if len(paths)+len(home) > 0 {
 		msg := entry.Note
 		if msg == "" {
 			msg = "(no description)"
@@ -219,6 +227,7 @@ func (e Entry) ID() string { return e.Time.Format(time.RFC3339Nano) }
 // root, so their commands come back as hint. With only, just those files of
 // the entry are taken back: say, the ones an Omarchy update changed under you.
 func (s *Store) Undo(id, by string, only ...string) (Entry, string, error) {
+	only = s.canon(only)
 	history, err := s.History()
 	if err != nil {
 		return Entry{}, "", err
@@ -322,7 +331,7 @@ func (s *Store) unmerge(commit, path string) ([]byte, error) {
 	}
 	after, existedAfter := blob(commit)
 	before, existedBefore := blob(commit + "^")
-	current, exists := readEntry(filepath.Join(s.ConfigDir, path))
+	current, exists := s.currentEntry(path)
 	switch {
 	case !existedBefore: // the entry created the file: remove it if untouched since
 		if exists && !bytes.Equal(current, after) {
@@ -336,7 +345,7 @@ func (s *Store) unmerge(commit, path string) ([]byte, error) {
 		return before, nil
 	case !exists:
 		return nil, errors.New("it was deleted")
-	case isLink(filepath.Join(s.ConfigDir, path)):
+	case isLink(s.realPath(path)):
 		if !bytes.Equal(current, after) {
 			return nil, errors.New("the link points elsewhere now")
 		}
@@ -370,7 +379,7 @@ func (s *Store) Revert(items []string) error {
 	if err != nil {
 		return err
 	}
-	chosen := Select(pending, items)
+	chosen := Select(pending, s.canon(items))
 	if len(chosen) == 0 {
 		return errors.New("nothing to revert: no pending change matches")
 	}
@@ -379,6 +388,14 @@ func (s *Store) Revert(items []string) error {
 		switch {
 		case c.Kind == "config" && c.Op == "added":
 			if err := s.removeEntry(c.Name); err != nil {
+				return err
+			}
+		case c.Kind == "config" && isHome(c.Name):
+			body, err := s.git(nil, "show", "HEAD:"+c.Name)
+			if err != nil {
+				return err
+			}
+			if err := s.writeEntry(c.Name, body, false); err != nil {
 				return err
 			}
 		case c.Kind == "config":
@@ -425,6 +442,9 @@ func (s *Store) Ignore(pattern string) error {
 	if pattern == "" || strings.HasPrefix(pattern, "#") {
 		return errors.New("empty pattern")
 	}
+	if isHome(pattern) { // the panel's ignore button on a tracked home file
+		return s.Untrack([]string{pattern})
+	}
 	if err := appendLines(s.excludeFile(), []string{"/" + strings.TrimPrefix(pattern, "/")}); err != nil {
 		return err
 	}
@@ -434,7 +454,9 @@ func (s *Store) Ignore(pattern string) error {
 	if err != nil {
 		return err
 	}
-	if files := splitNul(matched); len(files) > 0 {
+	// Tracked home files go with untrack: their "~" directory matches "*~".
+	files := slices.DeleteFunc(splitNul(matched), isHome)
+	if len(files) > 0 {
 		if _, err := s.git(nulJoin(files), "rm", "--cached", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 			return err
 		}
@@ -457,9 +479,21 @@ func (s *Store) Diff(w io.Writer, items []string, color bool) error {
 	if color {
 		colorFlag = "--color=always"
 	}
-	for _, c := range Select(pending, items) {
+	for _, c := range Select(pending, s.canon(items)) {
 		var cmd *exec.Cmd
 		switch {
+		case c.Kind == "config" && isHome(c.Name):
+			var old, now []byte
+			if c.Op != "added" {
+				if old, err = s.git(nil, "show", "HEAD:"+c.Name); err != nil {
+					return err
+				}
+			}
+			if c.Op != "removed" {
+				now, _, _ = s.homeContent(c.Name)
+			}
+			w.Write(diffBlobs(c.Name, old, now, colorFlag))
+			continue
 		case c.Kind != "config":
 			sign := "+"
 			if c.Op == "removed" {

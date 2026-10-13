@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -114,14 +113,15 @@ func (s *Store) PlanApply(source string) (*Plan, error) {
 	fields := splitNul(diff)
 	for i := 0; i+1 < len(fields); i += 2 {
 		status, path := fields[i], fields[i+1]
-		if !safePath(path) {
+		if _, _, err := s.rootFor(path); err != nil {
 			p.Cleanup()
-			return nil, fmt.Errorf("the backup has an unsafe path %q: refusing it", path)
+			return nil, fmt.Errorf("the backup has an unsafe path %q: refusing it (%w)", path, err)
 		}
-		local := filepath.Join(s.ConfigDir, path)
-		current, exists := readEntry(local)
+		local := s.realPath(path)
+		current, exists := s.currentEntry(path)
 		if status == "D" {
-			if exists {
+			// Untracking there drops a home file from the history too: never delete it here.
+			if exists && !isHome(path) {
 				p.Files = append(p.Files, FileAction{Path: path, Action: "delete"})
 			}
 			continue
@@ -137,12 +137,24 @@ func (s *Store) PlanApply(source string) (*Plan, error) {
 			return nil, err
 		}
 		fa := FileAction{Path: path, Action: "add", body: body, link: strings.HasPrefix(string(mode), "120000")}
+		if isHome(path) && (fa.link || !plainText(body)) {
+			p.Cleanup()
+			return nil, fmt.Errorf("the backup has %s as a symlink or with a secret: refusing it", path)
+		}
+		if isHome(path) {
+			_, ok, there := s.homeContent(path)
+			exists = exists || there // a file readHome refuses (a symlink, say) is still there
+			if there && !ok && !bytes.Equal(current, body) {
+				p.Cleanup()
+				return nil, fmt.Errorf("%s would be overwritten, but it holds something syschange cannot keep (a secret, binary or large file); move it away first", path)
+			}
+		}
 		if exists {
 			if bytes.Equal(current, body) {
 				p.Skipped++
 				continue
 			}
-			if !isLink(local) && !s.trackable(path) {
+			if !isHome(path) && !isLink(local) && !s.trackable(path) {
 				p.Cleanup()
 				return nil, fmt.Errorf("~/.config/%s would be overwritten, but it holds something syschange cannot keep (a secret, binary or large file); move it away first", path)
 			}
@@ -206,7 +218,11 @@ func (p *Plan) Print(w io.Writer) {
 		fmt.Fprintf(w, "  nothing to do, this machine already matches (%d files identical)\n", p.Skipped)
 	}
 	for _, f := range p.Files {
-		fmt.Fprintf(w, "  %-9s ~/.config/%s\n", f.Action, f.Path)
+		path := f.Path
+		if !isHome(path) {
+			path = "~/.config/" + path
+		}
+		fmt.Fprintf(w, "  %-9s %s\n", f.Action, path)
 	}
 	if len(p.Repo) > 0 {
 		fmt.Fprintf(w, "  install   %s\n", strings.Join(p.Repo, " "))
@@ -233,6 +249,27 @@ func (s *Store) Apply(p *Plan, run func(args ...string) error, by string) error 
 	}
 	if _, err := s.Checkpoint("Before applying " + p.Source); err != nil {
 		return err
+	}
+	// Files under $HOME stay tracked here, as they were there.
+	var home []string
+	for _, f := range p.Files {
+		if isHome(f.Path) && f.Action != "delete" {
+			home = append(home, f.Path)
+		}
+	}
+	if len(home) > 0 {
+		names, err := s.trackedFiles()
+		if err != nil {
+			return err
+		}
+		for _, name := range home {
+			if !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		}
+		if err := writeLines(s.trackedFile(), names); err != nil {
+			return err
+		}
 	}
 	var ids []string
 	for _, f := range p.Files {

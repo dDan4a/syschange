@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -123,7 +122,7 @@ func (s *Store) Attribute(changes []Change) {
 func changeTime(s *Store, c Change) (time.Time, bool) {
 	switch {
 	case c.Kind == "config" && c.Op != "removed":
-		info, err := os.Lstat(filepath.Join(s.ConfigDir, c.Name))
+		info, err := os.Lstat(s.realPath(c.Name))
 		if err != nil {
 			return time.Time{}, false
 		}

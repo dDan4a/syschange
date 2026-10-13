@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -87,11 +88,21 @@ func TestTrackHomeFiles(t *testing.T) {
 	if got := readFile(t, filepath.Join(home, ".gitconfig")); got != "[core]\neditor = nvim\n[user]\nname = me\n" {
 		t.Fatalf("revert left %q", got)
 	}
+	os.Chmod(filepath.Join(home, ".claude/settings.json"), 0o600)
 	os.Remove(filepath.Join(home, ".claude/settings.json"))
 	if p, _ := s.Pending(); !slices.Equal(ids(p), []string{"removed ~/.claude/settings.json"}) {
 		t.Fatalf("pending %v", ids(p))
 	}
-	s.Record([]string{"~/.claude"}, "drop it", "")
+	removal, _ := s.Record([]string{"~/.claude"}, "drop it", "")
+	// Brought back by undo, a file that may have been private is created 0600.
+	if _, _, err := s.Undo(removal.Commit, ""); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(home, ".claude/settings.json")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("restored as %v %v", info, err)
+	}
+	os.Remove(filepath.Join(home, ".claude/settings.json"))
+	s.Record([]string{"~/.claude"}, "drop it again", "")
 	write(t, home, ".claude/settings.json", "{}\n")
 	if p, _ := s.Pending(); !slices.Equal(ids(p), []string{"added ~/.claude/settings.json"}) {
 		t.Fatalf("pending %v", ids(p))
@@ -131,6 +142,10 @@ func TestTrackRefuses(t *testing.T) {
 	os.Symlink(filepath.Join(outside, "f"), filepath.Join(home, "link"))
 	os.Symlink(outside, filepath.Join(home, "dirlink"))
 	os.Symlink(filepath.Join(home, ".gitconfig"), filepath.Join(home, "inner"))
+	write(t, home, ".netrc", "machine x login me password hunter2\n")
+	write(t, home, ".kube/config", "client-key-data: LS0tLS1\n")
+	write(t, home, ".bash_history", "ls\n")
+	syscall.Mkfifo(filepath.Join(home, "fifo"), 0o600)
 	for _, p := range []string{
 		filepath.Join(outside, "f"),   // outside $HOME
 		"~/../f", "~/link", "~/inner", // escapes and symlinks
@@ -139,6 +154,7 @@ func TestTrackRefuses(t *testing.T) {
 		filepath.Join(s.ConfigDir, "git/config"), // already tracked as config
 		filepath.Join(s.StateDir, "journal.jsonl"),
 		"~/.ssh/config", "~/.netrc-token", "~/.npmrc", "~/bin.dat", "~/missing",
+		"~/.netrc", "~/.kube/config", "~/.bash_history", "~/fifo",
 	} {
 		if err := s.Track([]string{p}); err == nil {
 			t.Errorf("tracked %s", p)

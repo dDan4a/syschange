@@ -3,11 +3,13 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 )
 
 // Files outside the config directory that the user chose to track live in the
@@ -19,9 +21,10 @@ const homePrefix = "~/"
 
 func isHome(name string) bool { return strings.HasPrefix(name, homePrefix) }
 
-// noHome are directories under $HOME whose files are never tracked: keys and
-// password stores.
-var noHome = []string{".ssh", ".gnupg", ".password-store", ".local/share/keyrings", ".pki"}
+// noHome are paths under $HOME that are never tracked: keys, password stores,
+// credential files whose format the secret filter does not know, shell history.
+var noHome = []string{".ssh", ".gnupg", ".password-store", ".local/share/keyrings", ".pki", ".netrc", ".pgpass",
+	".git-credentials", ".kube", ".aws", ".docker", ".azure", ".vault-token", ".local/share/fish/fish_history"}
 
 func (s *Store) trackedFile() string { return s.path("tracked.txt") }
 
@@ -64,8 +67,8 @@ func (s *Store) homeAllowed(rel string) error {
 		}
 	}
 	for _, d := range noHome {
-		if rel == d || strings.HasPrefix(rel, d+"/") {
-			return fmt.Errorf("~/%s holds keys or passwords: syschange never tracks it", rel)
+		if rel == d || strings.HasPrefix(rel, d+"/") || strings.HasSuffix(rel, "_history") {
+			return fmt.Errorf("~/%s may hold keys or passwords: syschange never tracks it", rel)
 		}
 	}
 	// Exit status 1 alone means no exclude pattern (*token*, *.key, id_rsa* ...)
@@ -82,23 +85,30 @@ func (s *Store) homeAllowed(rel string) error {
 }
 
 // readHome reads a regular file under $HOME. Through os.Root, no symlink or
-// ".." leads outside it, and a symlink itself is refused.
+// ".." leads outside it; the file itself is checked on the open descriptor, so
+// a symlink, a FIFO or a file growing past the limit swapped in meanwhile is refused.
 func (s *Store) readHome(rel string) ([]byte, error) {
 	root, err := os.OpenRoot(s.HomeDir)
 	if err != nil {
 		return nil, err
 	}
 	defer root.Close()
-	info, err := root.Lstat(rel)
-	switch {
-	case err != nil:
+	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, fmt.Errorf("~/%s is a symlink", rel)
+	}
+	if err != nil {
 		return nil, err
-	case !info.Mode().IsRegular():
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("~/%s is not a regular file", rel)
-	case info.Size() > maxFileSize:
+	}
+	body, err := io.ReadAll(io.LimitReader(f, maxFileSize+1))
+	if err == nil && len(body) > maxFileSize {
 		return nil, fmt.Errorf("~/%s is larger than %d KB", rel, maxFileSize>>10)
 	}
-	return root.ReadFile(rel)
+	return body, err
 }
 
 // homeContent is a tracked file's content when syschange may keep a copy of it.

@@ -273,6 +273,9 @@ func (s *Store) writeEntry(path string, body []byte, link bool) error {
 		return err
 	}
 	mode := os.FileMode(0o644)
+	if dir == s.HomeDir {
+		mode = 0o600 // a home file brought back may have been private; git does not keep that
+	}
 	if info, err := root.Lstat(rel); err == nil && info.Mode().IsRegular() {
 		mode = info.Mode().Perm()
 	}

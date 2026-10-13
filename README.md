@@ -12,7 +12,7 @@ syschange notices every change to your setup and asks for a one-line description
 diff and undo it.
 
 - **Config files in `~/.config`**: kept in a private shadow git repository, so every edit has a diff
-  and can be undone.
+  and can be undone. Files elsewhere in your home folder too, when you pick them: `syschange track ~/.gitconfig`.
 - **Packages** you installed explicitly (`pacman`, AUR included) and **systemd services** you enabled,
   system and user.
 - **Human names**: "Hyprland: Key bindings" instead of `hypr/bindings.lua`.
@@ -83,6 +83,8 @@ Recorded 2 change(s).
 | `syschange diff [ID...]` | what changed in config files |
 | `syschange revert ID...` | undo config changes; prints the `sudo` command for packages and services |
 | `syschange ignore PATH` | never track this path |
+| `syschange track [FILE...]` | also track these files outside `~/.config` (see below); no FILE lists them |
+| `syschange untrack FILE...` | stop tracking them |
 | `syschange log [--grep TEXT]` | the history; with `--grep`, the entries whose description, files, packages or diff mention TEXT |
 | `syschange undo ENTRY [PATH...]` | undo a recorded entry (commit from `log`, or its time), or only some of its files |
 | `syschange checkpoint [NAME]` | save the whole setup now |
@@ -97,8 +99,9 @@ Recorded 2 change(s).
 | `syschange export --auto FILE\|off` | keep FILE updated after every record |
 | `syschange agents [install\|remove]` | connect Claude Code and Codex |
 
-An ID is a file inside `~/.config` (`hypr/bindings.lua`), an app directory (`hypr`), a package or unit name,
-or a group (`packages`, `services`). No ID means everything.
+An ID is a file inside `~/.config` (`hypr/bindings.lua`), an app directory (`hypr`), a tracked file
+(`~/.gitconfig`) or folder (`~/.claude`), a package or unit name, or a group (`packages`, `services`).
+No ID means everything.
 
 In the bar panel: `↑↓` select, `Enter` describe, `a` describe with AI, `A` describe all with AI, `s` keep without a description,
 `o` (or a click on the app) shows the diff right in the panel, `v` opens it in a terminal, `c` checkpoint,
@@ -164,10 +167,24 @@ turn, so an agent is never stuck in a loop. Records made by an agent carry its n
 Only want the skill? It also installs with [skills](https://github.com/vercel-labs/skills):
 `npx skills add dDan4a/syschange`.
 
+## Files outside `~/.config`
+
+```bash
+syschange track ~/.gitconfig ~/.claude/settings.json
+```
+
+Their current content becomes the starting point; later edits show up like any other change, as
+`~/.gitconfig`, with the same diff, undo, checkpoints, backup and `apply`. Only regular text files inside your
+home folder: no directories and no symlinks, nothing in `~/.ssh`, `~/.gnupg`, `~/.password-store`,
+`~/.local/share/keyrings` or `~/.pki`, nothing that matches the exclude patterns (`*token*`, `*.key`, `id_rsa*`
+...) and nothing that looks like it holds a secret. Undo, revert and restore write these files only inside your
+home folder: a symlinked folder never leads outside it. A restore leaves alone a file the checkpoint did not
+have. `syschange untrack FILE` stops tracking a file; its past versions stay in the history.
+
 ## Backup
 
 `syschange remote set URL` takes any git URL: a private GitHub repo, a server, a path on a USB disk. The remote
-gets the branch `config` (the history of `~/.config`), the branch `state` (the journal, package and service
+gets the branch `config` (the history of `~/.config` and tracked files), the branch `state` (the journal, package and service
 lists, AUR packages, checkpoints) and the checkpoint refs. After every recorded change and every checkpoint,
 a background push sends them; it never asks for a password, so use SSH keys or a credential helper. The cloud
 icon in the panel shows the last push and turns red when it fails.
@@ -193,7 +210,8 @@ config does.
 
 | Path | What |
 |---|---|
-| `~/.local/state/syschange/config.git` | shadow repository of `~/.config` |
+| `~/.local/state/syschange/config.git` | shadow repository of `~/.config`; tracked files as `~/…` paths |
+| `~/.local/state/syschange/tracked.txt` | files tracked outside `~/.config` |
 | `~/.local/state/syschange/config.git/info/exclude` | what is never tracked, gitignore syntax |
 | `~/.local/state/syschange/journal.jsonl` | the history with descriptions |
 | `~/.local/state/syschange/*.txt` | accepted package and service lists |

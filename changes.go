@@ -40,6 +40,11 @@ func (s *Store) Pending() ([]Change, error) {
 	if err != nil {
 		return nil, err
 	}
+	home, err := s.homeChanges()
+	if err != nil {
+		return nil, err
+	}
+	changes = append(changes, home...)
 	for _, src := range []struct {
 		kind, file string
 		list       func() ([]string, error)
@@ -72,6 +77,9 @@ func (s *Store) configChanges() ([]Change, error) {
 			continue
 		}
 		code, path := entry[:2], entry[3:]
+		if isHome(path) {
+			continue
+		}
 		var op string
 		switch {
 		case code == "??":
@@ -192,6 +200,10 @@ func groupOf(c Change) (key, title string) {
 		return "packages", "Packages"
 	case "unit":
 		return "services", "Services"
+	}
+	if rel, ok := strings.CutPrefix(c.Name, homePrefix); ok {
+		top, _, _ := strings.Cut(rel, "/")
+		return homePrefix + top, homePrefix + top
 	}
 	top, _, _ := strings.Cut(c.Name, "/")
 	return top, appName(top)

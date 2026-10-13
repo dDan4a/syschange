@@ -169,7 +169,7 @@ func changedSince(s *Store, c Change, t time.Time) bool {
 	t = t.Add(-time.Second)
 	switch c.Kind {
 	case "config":
-		info, err := os.Lstat(filepath.Join(s.ConfigDir, c.Name))
+		info, err := os.Lstat(s.realPath(c.Name))
 		return err == nil && info.ModTime().After(t)
 	case "package":
 		return c.Op == "added" && packageInstalledAfter(c.Name, t)

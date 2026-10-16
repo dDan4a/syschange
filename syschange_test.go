@@ -456,6 +456,20 @@ func TestSuggest(t *testing.T) {
 	if _, err := s.Suggest(nil, "pi"); err == nil {
 		t.Fatal("unsupported agent must fail")
 	}
+	// Refusals, questions and the UNKNOWN marker are errors, never labels.
+	for _, reply := range []string{
+		"UNKNOWN",
+		"I don't have enough context to determine what Happ.conf does",
+		"I don't have enough context.\nCould you clarify what bld is",
+		"Что делает этот файл?",
+		strings.Repeat("слово ", 30),
+	} {
+		os.WriteFile(filepath.Join(bin, "reply"), []byte(reply+"\n"), 0o644)
+		os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\ncat >/dev/null\ncat "+filepath.Join(bin, "reply")+"\n"), 0o755)
+		if line, err := s.Suggest([]string{"hypr"}, "claude"); err == nil || !strings.Contains(err.Error(), "describe it yourself") {
+			t.Errorf("reply %q: suggest = %q, %v", reply, line, err)
+		}
+	}
 }
 
 func TestAttributionFromToolCalls(t *testing.T) {

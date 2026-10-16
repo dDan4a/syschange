@@ -271,7 +271,7 @@ func TestSmallHelpers(t *testing.T) {
 	if envOr("XDG_TEST_UNSET", "d") != "d" {
 		t.Fatal("envOr")
 	}
-	if lastLine("\n  \n") != "" || lastLine(strings.Repeat("я", 200)) != strings.Repeat("я", 120) {
+	if lastLine("\n  \n") != "" || lastLine("a\n«b.»") != "b" {
 		t.Fatal("lastLine")
 	}
 	if _, err := jqEditBroken(t); err == nil {

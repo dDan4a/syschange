@@ -37,6 +37,7 @@ func (s *Store) Suggest(items []string, agent string) (string, error) {
 	prompt := fmt.Sprintf(`You label changes to a Linux desktop setup (Arch, Hyprland, Omarchy).
 Reply with ONE line of at most 80 characters that says what this change does for the user: its purpose, not file names.
 No quotes, no preamble, no trailing period. Write it in the language of the locale %q.
+If the diff does not show what the change is for, reply with exactly UNKNOWN: no questions, no explanations.
 
 Changed: %s
 
@@ -51,6 +52,9 @@ Changed: %s
 	line := lastLine(out)
 	if line == "" {
 		return "", fmt.Errorf("%s returned no text", agent)
+	}
+	if !plausibleLabel(out, line) {
+		return "", fmt.Errorf("%s could not describe this change; describe it yourself", agent)
 	}
 	return line, nil
 }
@@ -196,11 +200,24 @@ func lastLine(out string) string {
 		line = strings.Trim(line, "\"'`«»“”")
 		line = strings.TrimSuffix(line, ".")
 		if line != "" {
-			if r := []rune(line); len(r) > 120 {
-				line = string(r[:120])
-			}
 			return line
 		}
 	}
 	return ""
+}
+
+// plausibleLabel rejects answers that are not a label: the UNKNOWN marker, a
+// question, a line that talks to the user ("I…", "Sorry") anywhere in the
+// output (other chatter before the answer is fine), or an overlong label.
+func plausibleLabel(out, line string) bool {
+	if strings.Contains(out, "UNKNOWN") || strings.Contains(out, "?") || len([]rune(line)) > 120 {
+		return false
+	}
+	for _, l := range strings.Split(strings.ToLower(out), "\n") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "i ") || strings.HasPrefix(l, "i'") || strings.HasPrefix(l, "sorry") {
+			return false
+		}
+	}
+	return true
 }

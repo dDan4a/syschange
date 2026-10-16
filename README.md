@@ -1,42 +1,18 @@
-# syschange
+<div align="center">
+
+<h1>syschange</h1>
+
+A history of changes to your Linux setup, with a reason for each one and undo.<br>
+Your AI agents change your system: see what and why, and undo it.
 
 [![test](https://github.com/dDan4a/syschange/actions/workflows/test.yml/badge.svg)](https://github.com/dDan4a/syschange/actions/workflows/test.yml)
+[![tag](https://img.shields.io/github/v/tag/dDan4a/syschange?sort=semver&label=version)](https://github.com/dDan4a/syschange/tags)
+[![Omarchy plugin](https://img.shields.io/badge/Omarchy_plugin-verified-7aa2f7)](https://plugins.omarchy.org/plugin.html?id=dan4a.syschange)
+[![license](https://img.shields.io/github/license/dDan4a/syschange)](LICENSE)
 
-A history of changes to your Linux setup, with a reason for each one and undo.
+<img src="preview.png" alt="The System Changes panel in the Omarchy bar" width="900">
 
-![The System Changes panel in the Omarchy bar](preview.png)
-
-You tweak a keybinding, install a package, enable a service. A week later something is off and you
-don't remember what you touched, or your AI agent changed it while fixing something else.
-syschange notices every change to your setup and asks for a one-line description. You can see the
-diff and undo it.
-
-- **Config files in `~/.config`**: kept in a private shadow git repository, so every edit has a diff
-  and can be undone. Files elsewhere in your home folder too, when you pick them: `syschange track ~/.gitconfig`.
-- **Packages** you installed explicitly (`pacman`, AUR included) and **systemd services** you enabled,
-  system and user.
-- **Human names**: "Hyprland: Key bindings" instead of `hypr/bindings.lua`.
-- **Undo anything**: a change not recorded yet, or a recorded one later on. Undo takes back only that
-  entry's lines, so later edits to the same file survive.
-- **Checkpoints**: save the whole setup before an experiment, unrecorded edits included, and get back to it
-  in one click. The state before a restore is saved too, so a restore can be undone.
-- **Quiet on Omarchy**: an `omarchy update`, a theme or a font switch is recorded by itself as one entry
-  ("Theme: tokyo-night"), not dumped on you as dozens of changed files.
-- **Describe with AI**: one click (or `syschange suggest`) and your default agent reads the diff and
-  writes the line, in your system language, and saves it. Or describe all pending changes at once.
-- **You see which AI agent changed what**, even if it never says so. One click gives Claude Code, Codex,
-  Gemini CLI and Grok a skill and hooks; an agent that changed your system records why before it finishes.
-- **Backup to your own git repository**: `syschange remote set git@github.com:you/setup.git` and every change
-  is pushed in the background. Dotfiles on autopilot, with a reason for each change.
-- **New machine in one command**: `syschange apply git@github.com:you/setup.git` shows what it will do, then
-  writes the config files, installs the packages (AUR too) and enables the services you added on the old one.
-- **Markdown export**: the history with every change, what is not recorded yet, and the commands to repeat
-  your setup on a new machine. One click in the panel, or keep a file (in Obsidian, your dotfiles…) updated
-  after every change with `syschange export --auto FILE`.
-- **Omarchy bar widget**: new changes, history, describe, diff, undo.
-
-Browser and Electron profiles, caches, databases, binaries and anything that looks like a password,
-token or key are never copied into the history.
+</div>
 
 ## Install
 
@@ -73,6 +49,9 @@ $ syschange note "Voice typing on Super+R" hypr voxtype
 Recorded 2 change(s).
 ```
 
+<details>
+<summary><b>All commands</b></summary>
+
 | Command | What it does |
 |---|---|
 | `syschange status [--json]` | changes not recorded yet |
@@ -99,6 +78,8 @@ Recorded 2 change(s).
 | `syschange export --auto FILE\|off` | keep FILE updated after every record |
 | `syschange agents [install\|remove]` | connect Claude Code and Codex |
 
+</details>
+
 An ID is a file inside `~/.config` (`hypr/bindings.lua`), an app directory (`hypr`), a tracked file
 (`~/.gitconfig`) or folder (`~/.claude`), a package or unit name, or a group (`packages`, `services`).
 No ID means everything.
@@ -108,6 +89,49 @@ In the bar panel: `↑↓` select, `Enter` describe, `a` describe with AI, `A` d
 `m` export to Markdown and open it, `/` search the history, `r` refresh.
 Each line can be undone or ignored; each history entry can be undone. Undo and "stop tracking an app"
 ask for a second click.
+
+## What it does
+
+You tweak a keybinding, install a package, enable a service. A week later something is off and you
+don't remember what you touched, or your AI agent changed it while fixing something else.
+syschange notices every change to your setup and asks for a one-line description. You can see the
+diff and undo it.
+
+```mermaid
+flowchart LR
+  you["You, an AI agent<br>or omarchy update"] -->|edit, install, enable| pending["Pending<br>in the bar"]
+  pending -->|"one line: by hand or with AI"| history["History<br>with diff"]
+  history --> undo["Undo / checkpoints"]
+  history --> backup["Backup to git<br>and apply on a new machine"]
+  history --> md["Markdown export"]
+```
+
+- **Config files in `~/.config`**: kept in a private shadow git repository, so every edit has a diff
+  and can be undone. Files elsewhere in your home folder too, when you pick them: `syschange track ~/.gitconfig`.
+- **Packages** you installed explicitly (`pacman`, AUR included) and **systemd services** you enabled,
+  system and user.
+- **Human names**: "Hyprland: Key bindings" instead of `hypr/bindings.lua`.
+- **Undo anything**: a change not recorded yet, or a recorded one later on. Undo takes back only that
+  entry's lines, so later edits to the same file survive.
+- **Checkpoints**: save the whole setup before an experiment, unrecorded edits included, and get back to it
+  in one click. The state before a restore is saved too, so a restore can be undone.
+- **Quiet on Omarchy**: an `omarchy update`, a theme or a font switch is recorded by itself as one entry
+  ("Theme: tokyo-night"), not dumped on you as dozens of changed files.
+- **Describe with AI**: one click (or `syschange suggest`) and your default agent reads the diff and
+  writes the line, in your system language, and saves it. Or describe all pending changes at once.
+- **You see which AI agent changed what**, even if it never says so. One click gives Claude Code, Codex,
+  Gemini CLI and Grok a skill and hooks; an agent that changed your system records why before it finishes.
+- **Backup to your own git repository**: `syschange remote set git@github.com:you/setup.git` and every change
+  is pushed in the background. Dotfiles on autopilot, with a reason for each change.
+- **New machine in one command**: `syschange apply git@github.com:you/setup.git` shows what it will do, then
+  writes the config files, installs the packages (AUR too) and enables the services you added on the old one.
+- **Markdown export**: the history with every change, what is not recorded yet, and the commands to repeat
+  your setup on a new machine. One click in the panel, or keep a file (in Obsidian, your dotfiles…) updated
+  after every change with `syschange export --auto FILE`.
+- **Omarchy bar widget**: new changes, history, describe, diff, undo.
+
+Browser and Electron profiles, caches, databases, binaries and anything that looks like a password,
+token or key are never copied into the history.
 
 ## Omarchy
 
@@ -203,8 +227,9 @@ repositories and the AUR) and services you enabled. It prints the plan and asks;
 part can be undone with `syschange restore "Before applying …"`. Packages removed on the old machine are listed,
 never removed here. Running `apply` again only does what is still missing.
 
-**Keep that repository private.** Files that look like secrets never enter the history, but the rest of your
-config does.
+> [!WARNING]
+> **Keep that repository private.** Files that look like secrets never enter the history, but the rest of your
+> config does.
 
 ## Where things live
 

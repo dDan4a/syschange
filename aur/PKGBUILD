@@ -1,6 +1,6 @@
 # Maintainer: dDan4a <danshtal at gmail dot com>
 pkgname=syschange
-pkgver=0.3.0
+pkgver=0.3.1
 pkgrel=1
 pkgdesc="A history of changes to your setup: config files, packages and services, with diff and undo"
 arch=('x86_64' 'aarch64')
@@ -9,7 +9,7 @@ license=('MIT')
 depends=('glibc' 'git' 'jq' 'procps-ng')
 makedepends=('go')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('a5cfaa495fde669d904901ad24ac7e266105d907b020f060b6117bd491af4ce3')
+sha256sums=('893b70fda43e564bde28710d24bc5918243adb70b09bed85320c3a6f5cd47913')
 
 build() {
   cd "$pkgname-$pkgver"

@@ -1,6 +1,6 @@
 pkgbase = syschange
 	pkgdesc = A history of changes to your setup: config files, packages and services, with diff and undo
-	pkgver = 0.3.0
+	pkgver = 0.3.1
 	pkgrel = 1
 	url = https://github.com/dDan4a/syschange
 	arch = x86_64
@@ -11,7 +11,7 @@ pkgbase = syschange
 	depends = git
 	depends = jq
 	depends = procps-ng
-	source = syschange-0.3.0.tar.gz::https://github.com/dDan4a/syschange/archive/refs/tags/v0.3.0.tar.gz
-	sha256sums = a5cfaa495fde669d904901ad24ac7e266105d907b020f060b6117bd491af4ce3
+	source = syschange-0.3.1.tar.gz::https://github.com/dDan4a/syschange/archive/refs/tags/v0.3.1.tar.gz
+	sha256sums = 893b70fda43e564bde28710d24bc5918243adb70b09bed85320c3a6f5cd47913
 
 pkgname = syschange

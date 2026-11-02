@@ -29,11 +29,13 @@ Item {
   property int count: 0
   property var agents: []       // installed coding agents: {name, connected}
   readonly property bool agentsConnected: agents.length > 0 && agents.every(function(a) { return a.connected })
-  // Errors of the last action stay until the next action; a later status poll
-  // must not wipe "run this as root" or "undo it by hand".
+  // Errors of the last action stay until the next action or until dismissed; a
+  // later status poll must not wipe "run this as root" or "undo it by hand".
+  // A failed AI description also ends when nothing is left to describe.
   property string statusError: ""
   property string actionError: ""
-  readonly property string error: actionError !== "" ? actionError : statusError
+  property string describeError: ""
+  readonly property string error: actionError !== "" ? actionError : describeError !== "" ? describeError : statusError
   property string notice: ""        // commands to run as root after an undo or restore
   property var checkpoints: []
   property string diffKey: ""       // group whose diff is shown inline
@@ -92,7 +94,7 @@ Item {
     var args = queue[0]
     queue = queue.slice(1)
     notice = ""
-    actionError = ""
+    dismissError()
     actionProcess.command = [binary, args[0], "--"].concat(args.slice(1))
     actionProcess.running = true
   }
@@ -109,6 +111,7 @@ Item {
   function exportMarkdown() {
     var path = autoExport || exportPath
     if (path === "" || exportProcess.running) return
+    dismissError()
     exportProcess.path = path
     exportProcess.command = [binary, "export", "--to", path]
     exportProcess.running = true
@@ -121,6 +124,7 @@ Item {
 
   function suggest(key) {
     if (suggestProcess.running) return
+    dismissError()
     suggestingKey = key
     suggestProcess.command = [binary, "suggest", key]
     suggestProcess.running = true
@@ -128,6 +132,7 @@ Item {
   // Describes and records every group; the CLI shows the result as a notification.
   function suggestAll() {
     if (suggestProcess.running) return
+    dismissError()
     suggestingKey = "@all"
     suggestProcess.command = [binary, "suggest", "--all", "--send"]
     suggestProcess.running = true
@@ -188,6 +193,7 @@ Item {
     return msg.length > 400 ? msg.slice(0, 397) + "..." : msg
   }
   function failure(text) { actionError = message(text) }
+  function dismissError() { actionError = ""; describeError = "" }
 
   Component.onCompleted: refresh()
 
@@ -233,6 +239,7 @@ Item {
         root.pending = s.pending || []
         root.history = s.history || []
         root.count = s.count || 0
+        if (root.count === 0) root.describeError = ""
         root.agents = s.agents || []
         root.checkpoints = s.checkpoints || []
         root.autoExport = s.autoExport || ""
@@ -247,7 +254,7 @@ Item {
         if (changed && root.query !== "") root.search(root.query)
         root.statusError = ""
       } catch (e) {
-        root.failure("unexpected output from syschange status")
+        root.statusError = "unexpected output from syschange status"
       }
     }
   }
@@ -304,7 +311,7 @@ Item {
       var key = root.suggestingKey
       root.suggestingKey = ""
       if (key === "@all") root.refresh()
-      if (exitCode !== 0) { root.failure(suggestErr.text || suggestOut.text); return }
+      if (exitCode !== 0) { root.describeError = root.message(suggestErr.text || suggestOut.text); return }
       if (key === "@all") return
       root.suggested(key, String(suggestOut.text || "").trim())
     }

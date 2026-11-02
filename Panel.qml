@@ -23,6 +23,7 @@ Panel {
   readonly property var shownHistory: searching && source && source.query !== "" ? source.found : history
   property int selected: 0
   property string editingKey: ""   // group being described
+  property real now: Date.now()    // what ago() counts from: the lists keep their delegates while their data stays the same
   property string armed: ""        // destructive action waiting for a second click: "revert:<id>", "ignore:<group>", "undo:<entry>"
 
   function open() { root.selected = 0; root.editingKey = ""; root.controller.show() }
@@ -144,7 +145,7 @@ Panel {
   }
 
   function ago(iso) {
-    var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
+    var s = Math.max(0, (root.now - new Date(iso).getTime()) / 1000)
     if (s < 60) return "now"
     if (s < 3600) return Math.floor(s / 60) + "m ago"
     if (s < 86400) return Math.floor(s / 3600) + "h ago"
@@ -153,6 +154,8 @@ Panel {
   onGroupsChanged: if (selected >= groups.length) selected = Math.max(0, groups.length - 1)
 
   Timer { id: disarm; interval: 4000; onTriggered: root.armed = "" }
+  onOpenedChanged: if (opened) now = Date.now()
+  Timer { interval: 60000; running: root.opened; repeat: true; onTriggered: root.now = Date.now() }
 
   KeyboardPanel {
     id: panel
@@ -180,7 +183,7 @@ Panel {
         var key = text.toLowerCase(), g = root.current()
         if (!root.source) return
         if (text === "A") { if (root.source.suggestingKey === "" && root.groups.length > 0) root.source.suggestAll() }
-        else if (key === "r") root.source.refresh()
+        else if (key === "r") { root.source.dismissError(); root.source.refresh() }
         else if (key === "c") root.newCheckpoint()
         else if (key === "m") root.source.exportMarkdown()
         else if (key === "/") root.openSearch()
@@ -231,6 +234,11 @@ Panel {
             font.pixelSize: Style.font.caption
             wrapMode: Text.Wrap
             textFormat: Text.PlainText
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.source.dismissError()
+            }
           }
 
           Text {
@@ -791,7 +799,7 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · A AI all · s keep · o/v diff · / search · c checkpoint · r refresh"
+            text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · A AI all · s keep · o/v diff · / search · c checkpoint · r refresh, clear error"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

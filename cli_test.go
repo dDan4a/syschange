@@ -299,7 +299,7 @@ func TestCLISuggestAll(t *testing.T) {
 	}
 	must(t, c.ok("log"), "AI line  [grok]")
 	must(t, c.ok("status"), "Waybar")
-	c.fails("no change could be described", "suggest", "--all", "--agent", "grok")
+	c.fails("no change could be described:\nWaybar: failed", "suggest", "--all", "--agent", "grok")
 }
 
 func TestCLINotInitialized(t *testing.T) {

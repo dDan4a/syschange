@@ -377,7 +377,7 @@ func suggestAll(s *Store, w io.Writer, agent string, send bool) error {
 		}
 	}
 	if described == 0 {
-		return errors.New("no change could be described")
+		return fmt.Errorf("no change could be described:\n%s", strings.TrimSpace(lines.String()))
 	}
 	return nil
 }

@@ -63,14 +63,11 @@ func (s *Store) Push() error {
 		return errors.New("no backup remote, set one with: syschange remote set URL")
 	}
 	// One push at a time: two would build the state branch on the same parent and fork it.
-	lock, err := os.OpenFile(s.path("push.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := s.lock("push.lock")
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
 	err = s.commitState()
 	if err == nil {
 		// Never ask for a password: this runs in the background.

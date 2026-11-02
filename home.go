@@ -75,7 +75,22 @@ func (s *Store) homeAllowed(rel string) error {
 	// matches; anything else refuses. The path is checked as if it were in the
 	// config dir: "~/x" would match "*~". check-ignore rejects
 	// --literal-pathspecs, so it runs without s.git's flags.
-	cmd := exec.Command("git", "--git-dir="+s.gitDir(), "--work-tree="+s.ConfigDir, "check-ignore", "-q", "--no-index", "--", rel)
+	gitDir := s.gitDir()
+	if !s.Initialized() { // apply plans before it starts tracking: check against the default patterns
+		tmp, err := os.MkdirTemp("", "syschange-excludes-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tmp)
+		if err := exec.Command("git", "init", "--bare", "--quiet", tmp).Run(); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(tmp, "info", "exclude"), []byte(defaultExcludes), 0o600); err != nil {
+			return err
+		}
+		gitDir = tmp
+	}
+	cmd := exec.Command("git", "--git-dir="+gitDir, "--work-tree="+s.ConfigDir, "check-ignore", "-q", "--no-index", "--", rel)
 	cmd.Dir = s.ConfigDir
 	var exit *exec.ExitError
 	if err := cmd.Run(); !errors.As(err, &exit) || exit.ExitCode() != 1 {

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 )
 
 // Store is the on-disk state: a shadow git repository whose work tree is the
@@ -56,6 +57,19 @@ func (s *Store) path(name string) string {
 	return filepath.Join(s.StateDir, name)
 }
 
+// lock waits for the named lock in the state directory. Closing the file releases it.
+func (s *Store) lock(name string) (*os.File, error) {
+	f, err := os.OpenFile(s.path(name), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
 func (s *Store) Initialized() bool {
 	_, err := os.Stat(s.gitDir())
 	return err == nil
@@ -69,7 +83,8 @@ func (s *Store) git(stdin []byte, args ...string) ([]byte, error) {
 
 func (s *Store) gitEnv(env []string, stdin []byte, args ...string) ([]byte, error) {
 	base := []string{
-		"--git-dir=" + s.gitDir(), "--work-tree=" + s.ConfigDir, "--literal-pathspecs",
+		// No optional locks: the bar's status poll must not take index.lock from a running record.
+		"--no-optional-locks", "--git-dir=" + s.gitDir(), "--work-tree=" + s.ConfigDir, "--literal-pathspecs",
 		"-c", "core.quotepath=off", "-c", "user.name=syschange", "-c", "user.email=syschange@localhost",
 		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
 	}

@@ -27,7 +27,7 @@ The button opens a terminal, builds the CLI version the widget is written for in
 build, without installing it globally. When the widget is updated and needs a newer CLI, the same button
 offers the update.
 
-By hand, anywhere:
+By hand, on any Arch-based system (it reads the package list with `pacman`):
 
 ```bash
 GOBIN=~/.local/bin go install github.com/dDan4a/syschange@latest
@@ -76,7 +76,7 @@ Recorded 2 change(s).
 | `syschange notify [--remind-days N] [--no-digest]` | notifications due now, as JSON (the panel shows them) |
 | `syschange export [--to FILE]` | Markdown: history and setup steps |
 | `syschange export --auto FILE\|off` | keep FILE updated after every record |
-| `syschange agents [install\|remove]` | connect Claude Code and Codex |
+| `syschange agents [install\|remove]` | connect Claude Code, Codex, Gemini CLI and Grok |
 
 </details>
 
@@ -241,7 +241,7 @@ never removed here. Running `apply` again only does what is still missing.
 | `~/.local/state/syschange/journal.jsonl` | the history with descriptions |
 | `~/.local/state/syschange/*.txt` | accepted package and service lists |
 
-The state directory is `0700`. Nothing leaves your machine.
+The state directory is `0700`. Nothing leaves your machine unless you set a backup remote or ask an AI agent to describe a change.
 
 ## Limits
 

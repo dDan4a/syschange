@@ -39,7 +39,7 @@ Write the reason, not the diff: "Fix Bluetooth headset switching to HSP", not
 | What changed recently, and why | `syschange log` |
 | What exactly changed in a file | `syschange diff hypr/bindings.lua` |
 | Undo a config change that is not recorded yet | `syschange revert <ID>` |
-| Undo a recorded change | find the commit in `syschange log`, show the diff, ask, then edit the file back |
+| Undo a recorded change | find the commit in `syschange log`, show the diff, ask, then `syschange undo <commit>` |
 | Stop tracking noisy app state | `syschange ignore <path>` |
 | Track a file outside `~/.config` (`~/.gitconfig`) | `syschange track <file>`; ask first |
 | Steps to repeat this setup on a new machine | `syschange export` |

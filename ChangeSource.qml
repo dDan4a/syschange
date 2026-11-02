@@ -159,6 +159,7 @@ Item {
   function parseDiff(text) {
     var out = []
     var firstHunk = true
+    var header = false // before a file's first hunk; inside hunks "--- x" is a removed line "-- x"
     var lines = String(text || "").split("\n")
     for (var i = 0; i < lines.length; i++) {
       var l = lines[i]
@@ -166,9 +167,11 @@ Item {
         var m = / b\/(.*)$/.exec(l)
         out.push({ kind: "file", text: m ? m[1] : l })
         firstHunk = true
-      } else if (/^(index |--- |\+\+\+ |new file|deleted file|old mode|new mode|similarity)/.test(l)) {
+        header = true
+      } else if (header && /^(index |--- |\+\+\+ |new file|deleted file|old mode|new mode|similarity)/.test(l)) {
         continue
       } else if (l.indexOf("@@") === 0) {
+        header = false
         if (!firstHunk) out.push({ kind: "hunk", text: "⋯" }) // a gap between hunks of one file
         firstHunk = false
       } else if (l[0] === "+") {

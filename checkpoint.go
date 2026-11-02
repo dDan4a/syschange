@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -133,9 +134,15 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	} else if len(risky) > 0 {
 		return "", fmt.Errorf("these files have changes a checkpoint cannot keep (secrets, binary or large files), so a restore would lose them: %s. Revert them or stop tracking them first", strings.Join(risky, ", "))
 	}
-	if _, err := s.Checkpoint("Before restoring " + target.Name); err != nil {
+	before, err := s.Checkpoint("Before restoring " + target.Name)
+	if err != nil {
 		return "", err
 	}
+	savedTree, err := s.git(nil, "ls-tree", "-r", "--name-only", "-z", before.Commit)
+	if err != nil {
+		return "", err
+	}
+	saved := splitNul(savedTree)
 
 	// Files of the checkpoint come back; files it did not have go away. The
 	// paths are listed, as "." would also bring "~/" files into the config dir.
@@ -151,10 +158,15 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	var restore []string
 	seen := map[string]bool{}
 	for _, f := range append(slices.Clone(keep), splitNul(inIndex)...) {
-		if !isHome(f) && !seen[f] {
-			seen[f] = true
-			restore = append(restore, f)
+		if isHome(f) || seen[f] {
+			continue
 		}
+		seen[f] = true
+		// A file the checkpoint above could not keep (ignored since, or a secret) stays as it is.
+		if _, err := os.Lstat(filepath.Join(s.ConfigDir, f)); err == nil && !slices.Contains(saved, f) {
+			continue
+		}
+		restore = append(restore, f)
 	}
 	if len(restore) > 0 {
 		if _, err := s.git(nulJoin(restore), "restore", "--source="+target.Commit, "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {

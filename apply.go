@@ -122,6 +122,10 @@ func (s *Store) PlanApply(source string) (*Plan, error) {
 		if status == "D" {
 			// Untracking there drops a home file from the history too: never delete it here.
 			if exists && !isHome(path) {
+				if !isLink(local) && !s.trackable(path) {
+					p.Cleanup()
+					return nil, fmt.Errorf("~/.config/%s would be deleted, but it holds something syschange cannot keep (a secret, binary or large file); move it away first", path)
+				}
 				p.Files = append(p.Files, FileAction{Path: path, Action: "delete"})
 			}
 			continue

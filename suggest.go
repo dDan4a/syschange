@@ -157,6 +157,7 @@ func runAgent(ctx context.Context, agent, prompt string) (string, error) {
 	cmd.Dir = os.TempDir() // not inside a project the agent might start exploring
 	cmd.Env = append(os.Environ(), "SYSCHANGE_SUGGEST=1")
 	cmd.Stdin = strings.NewReader(stdin)
+	cmd.WaitDelay = 5 * time.Second // a child left holding stdout must not outlive the timeout
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

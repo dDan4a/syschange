@@ -36,6 +36,22 @@ func (s *Store) Record(items []string, note, by string) (Entry, error) {
 }
 
 func (s *Store) record(items []string, note, by, undoes string) (Entry, error) {
+	entry, err := s.commitEntry(items, note, by, undoes)
+	if err != nil {
+		return entry, err
+	}
+	s.afterChange()
+	return entry, nil
+}
+
+// commitEntry stages and commits under a lock: agents record at the same time,
+// and one's git add would otherwise land in the other's commit.
+func (s *Store) commitEntry(items []string, note, by, undoes string) (Entry, error) {
+	lock, err := s.lock("record.lock")
+	if err != nil {
+		return Entry{}, err
+	}
+	defer lock.Close()
 	pending, err := s.Pending()
 	if err != nil {
 		return Entry{}, err
@@ -83,11 +99,7 @@ func (s *Store) record(items []string, note, by, undoes string) (Entry, error) {
 			return Entry{}, err
 		}
 	}
-	if err := s.appendJournal(entry); err != nil {
-		return entry, err
-	}
-	s.afterChange()
-	return entry, nil
+	return entry, s.appendJournal(entry)
 }
 
 // afterChange keeps the Markdown export and the backup remote in step with
@@ -149,8 +161,10 @@ func (s *Store) History() ([]Entry, error) {
 	sc.Buffer(make([]byte, 0, 64<<10), 16<<20)
 	for sc.Scan() {
 		var e Entry
+		// A line cut short by a crash must not take the whole history with it; it stays in the file.
 		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
-			return nil, fmt.Errorf("journal.jsonl: %w", err)
+			fmt.Fprintln(os.Stderr, "syschange: journal.jsonl: skipping a broken line:", err)
+			continue
 		}
 		entries = append(entries, e)
 	}

@@ -617,34 +617,9 @@ Panel {
 
           Repeater {
             model: root.source ? root.source.checkpoints.slice(0, 5) : []
-            delegate: Item {
-              id: cpItem
-              required property var modelData
-              readonly property bool armed: root.armed === "restore:" + modelData.commit
+            delegate: CheckpointDelegate {
+              panel: root
               width: contentColumn.width
-              height: Math.max(cpText.implicitHeight, cpRestore.implicitHeight)
-              Text {
-                id: cpText
-                anchors.left: parent.left
-                anchors.right: cpRestore.left
-                anchors.verticalCenter: parent.verticalCenter
-                text: cpItem.armed ? "Click again to restore config files to “" + cpItem.modelData.name + "”" : cpItem.modelData.name + "  ·  "
-                                     + root.ago(cpItem.modelData.time)
-                color: cpItem.armed ? Color.urgent : root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                elide: Text.ElideRight
-                textFormat: Text.PlainText
-              }
-              PanelActionButton {
-                id: cpRestore
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                iconText: "󰦛" // nf-md-restore
-                tooltipText: "Restore. The current state is saved as a checkpoint first"
-                foreground: cpItem.armed ? Color.urgent : root.dim
-                onClicked: root.restoreCheckpoint(cpItem.modelData)
-              }
             }
           }
 

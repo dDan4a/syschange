@@ -33,11 +33,14 @@ func DefaultStore() (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	config := os.Getenv("SYSCHANGE_CONFIG_DIR")
 	if config == "" {
 		config = envOr("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	}
+
 	state := filepath.Join(envOr("XDG_STATE_HOME", filepath.Join(home, ".local", "state")), "syschange")
+
 	return &Store{ConfigDir: config, StateDir: state, HomeDir: home, ListPackages: pacmanExplicit, ListUnits: enabledUnits,
 		ListForeign: func() ([]string, error) { return foreignPackages(), nil }, SpawnPush: spawnPush}, nil
 }
@@ -46,6 +49,7 @@ func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+
 	return fallback
 }
 
@@ -63,10 +67,12 @@ func (s *Store) lock(name string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		f.Close()
 		return nil, err
 	}
+
 	return f, nil
 }
 
@@ -89,19 +95,25 @@ func (s *Store) gitEnv(env []string, stdin []byte, args ...string) ([]byte, erro
 		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
 	}
 	cmd := exec.Command("git", append(base, args...)...)
+
 	cmd.Dir = s.ConfigDir // pathspecs like "." resolve against the working directory
 	if env != nil {
 		cmd.Env = append(os.Environ(), env...)
 	}
+
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
+
 	var stderr bytes.Buffer
+
 	cmd.Stderr = &stderr
+
 	out, err := cmd.Output()
 	if err != nil {
 		return out, fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
 	}
+
 	return out, nil
 }
 
@@ -111,14 +123,18 @@ func (s *Store) Init() error {
 	if err != nil {
 		return err
 	}
+
 	if s.Initialized() {
 		created, err := s.installOmarchyHooks(exe)
 		if err != nil || len(created) == 0 {
 			return err
 		}
+
 		_, err = s.Record(created, "Record Omarchy updates, theme and font changes automatically", "syschange")
+
 		return err
 	}
+
 	if err := os.MkdirAll(s.StateDir, 0o700); err != nil {
 		return err
 	}
@@ -126,28 +142,36 @@ func (s *Store) Init() error {
 	if err := os.Chmod(s.StateDir, 0o700); err != nil {
 		return err
 	}
+
 	if _, err := s.git(nil, "init", "--quiet"); err != nil {
 		return err
 	}
+
 	if err := os.WriteFile(s.excludeFile(), []byte(defaultExcludes), 0o600); err != nil {
 		return err
 	}
+
 	if err := s.autoExclude(); err != nil {
 		return err
 	}
+
 	if _, err := s.installOmarchyHooks(exe); err != nil {
 		return err
 	}
+
 	files, err := s.untracked()
 	if err != nil {
 		return err
 	}
+
 	if _, err := s.git(nulJoin(files), "add", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 		return err
 	}
+
 	if _, err := s.git(nil, "commit", "--quiet", "--allow-empty", "-m", "syschange init"); err != nil {
 		return err
 	}
+
 	for _, snap := range []struct {
 		list func() ([]string, error)
 		name string
@@ -163,6 +187,7 @@ func (s *Store) Init() error {
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -173,12 +198,15 @@ func (s *Store) untracked() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var files []string
+
 	for _, f := range splitNul(out) {
 		if s.trackable(f) {
 			files = append(files, f)
 		}
 	}
+
 	return files, nil
 }
 
@@ -188,18 +216,24 @@ func (s *Store) trackable(rel string) bool {
 	if isHome(rel) { // a "~" directory in the config dir would clash with tracked home files
 		return false
 	}
+
 	full := filepath.Join(s.ConfigDir, rel)
+
 	info, err := os.Lstat(full)
 	if err != nil || info.Size() > maxFileSize {
 		return false
 	}
+
 	if info.Mode()&os.ModeSymlink != 0 {
 		return true
 	}
+
 	if !info.Mode().IsRegular() {
 		return false
 	}
+
 	body, err := os.ReadFile(full)
+
 	return err == nil && plainText(body)
 }
 
@@ -217,6 +251,7 @@ func looksSecret(body []byte) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -235,17 +270,21 @@ func writeAtomic(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	defer os.Remove(f.Name())
+
 	if _, err := f.Write(data); err != nil {
 		f.Close()
 		return err
 	}
+
 	if err := f.Chmod(perm); err != nil {
 		f.Close()
 		return err
 	}
+
 	if err := f.Close(); err != nil {
 		return err
 	}
+
 	return os.Rename(f.Name(), path)
 }
 
@@ -255,11 +294,13 @@ func safePath(p string) bool {
 	if !filepath.IsLocal(p) {
 		return false
 	}
+
 	for _, r := range p {
 		if r < 0x20 || r == 0x7f {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -272,34 +313,43 @@ func (s *Store) writeEntry(path string, body []byte, link bool) error {
 	if err != nil {
 		return err
 	}
+
 	if link && dir == s.HomeDir {
 		return fmt.Errorf("refusing to make %s a symlink", path)
 	}
+
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
+
 	perm := os.FileMode(0o755)
 	if dir == s.HomeDir {
 		perm = 0o700 // say ~/.claude: only you
 	}
+
 	if err := root.MkdirAll(filepath.Dir(rel), perm); err != nil {
 		return err
 	}
+
 	mode := os.FileMode(0o644)
 	if dir == s.HomeDir {
 		mode = 0o600 // a home file brought back may have been private; git does not keep that
 	}
+
 	if info, err := root.Lstat(rel); err == nil && info.Mode().IsRegular() {
 		mode = info.Mode().Perm()
 	}
+
 	if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+
 	if link {
 		return root.Symlink(string(body), rel)
 	}
+
 	return root.WriteFile(rel, body, mode)
 }
 
@@ -309,14 +359,17 @@ func (s *Store) removeEntry(path string) error {
 	if err != nil {
 		return err
 	}
+
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
+
 	if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+
 	return nil
 }
 
@@ -325,9 +378,11 @@ func (s *Store) rootFor(path string) (dir, rel string, err error) {
 	if rel, ok := strings.CutPrefix(path, homePrefix); ok {
 		return s.HomeDir, rel, s.homeAllowed(rel)
 	}
+
 	if !safePath(path) {
 		return "", "", fmt.Errorf("refusing unsafe path %q", path)
 	}
+
 	return s.ConfigDir, path, nil
 }
 
@@ -338,18 +393,22 @@ func (s *Store) unsaved() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var paths []string
+
 	for _, p := range splitNul(out) {
 		if _, err := os.Lstat(filepath.Join(s.ConfigDir, p)); err == nil && !s.trackable(p) {
 			paths = append(paths, p)
 		}
 	}
+
 	names, err := s.trackedFiles()
 	for _, name := range names {
 		if _, ok, exists := s.homeContent(name); exists && !ok {
 			paths = append(paths, name)
 		}
 	}
+
 	return paths, err
 }
 
@@ -361,19 +420,26 @@ func (s *Store) autoExclude() error {
 	if err != nil {
 		return err
 	}
-	var add []string
-	var scan func(rel string, depth int)
+
+	var (
+		add  []string
+		scan func(rel string, depth int)
+	)
+
 	scan = func(rel string, depth int) {
 		entries, _ := os.ReadDir(filepath.Join(s.ConfigDir, rel))
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
 			}
+
 			child := filepath.Join(rel, e.Name())
+
 			pattern := "/" + filepath.ToSlash(child) + "/"
 			if slices.Contains(current, pattern) {
 				continue
 			}
+
 			if isAppProfile(filepath.Join(s.ConfigDir, child)) {
 				add = append(add, pattern)
 			} else if depth < 2 {
@@ -382,9 +448,11 @@ func (s *Store) autoExclude() error {
 		}
 	}
 	scan("", 1)
+
 	if len(add) == 0 {
 		return nil
 	}
+
 	return appendLines(s.excludeFile(), add)
 }
 
@@ -394,6 +462,7 @@ func isAppProfile(dir string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -402,17 +471,22 @@ func readLines(path string) ([]string, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	defer f.Close()
+
 	var lines []string
+
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		if line := strings.TrimSpace(sc.Text()); line != "" {
 			lines = append(lines, line)
 		}
 	}
+
 	return lines, sc.Err()
 }
 
@@ -426,20 +500,24 @@ func appendLines(path string, lines []string) error {
 	if err != nil {
 		return err
 	}
+
 	_, err = f.WriteString(strings.Join(lines, "\n") + "\n")
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
+
 	return err
 }
 
 func splitNul(b []byte) []string {
 	var out []string
-	for _, p := range bytes.Split(b, []byte{0}) {
+
+	for p := range bytes.SplitSeq(b, []byte{0}) {
 		if len(p) > 0 {
 			out = append(out, string(p))
 		}
 	}
+
 	return out
 }
 
@@ -449,6 +527,7 @@ func nulJoin(items []string) []byte {
 		b.WriteString(it)
 		b.WriteByte(0)
 	}
+
 	return b.Bytes()
 }
 
@@ -458,27 +537,32 @@ func pacmanExplicit() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pacman -Qqe: %w", err)
 	}
+
 	return strings.Fields(string(out)), nil
 }
 
 // enabledUnits lists enabled systemd units as "system name" / "user name".
 func enabledUnits() ([]string, error) {
 	var units []string
+
 	for _, scope := range []string{"system", "user"} {
 		args := []string{"list-unit-files", "--state=enabled", "--no-legend", "--no-pager"}
 		if scope == "user" {
 			args = append([]string{"--user"}, args...)
 		}
+
 		out, err := exec.Command("systemctl", args...).Output()
 		if err != nil {
 			return nil, fmt.Errorf("systemctl %s: %w", strings.Join(args, " "), err)
 		}
-		for _, line := range strings.Split(string(out), "\n") {
+
+		for line := range strings.SplitSeq(string(out), "\n") {
 			if f := strings.Fields(line); len(f) > 0 {
 				units = append(units, scope+" "+f[0])
 			}
 		}
 	}
+
 	return units, nil
 }
 

@@ -33,6 +33,7 @@ func (s *Store) RemoteURL() string {
 	if err != nil {
 		return ""
 	}
+
 	return strings.TrimSpace(string(out))
 }
 
@@ -41,18 +42,22 @@ func (s *Store) SetRemote(url string) error {
 	if !s.Initialized() {
 		return ErrNotInitialized
 	}
+
 	if s.RemoteURL() != "" {
 		if _, err := s.git(nil, "remote", "remove", backupRemote); err != nil {
 			return err
 		}
 	}
+
 	if url == "" {
 		os.Remove(s.path("push.json"))
 		return nil
 	}
+
 	if _, err := s.git(nil, "remote", "add", backupRemote, url); err != nil {
 		return err
 	}
+
 	return s.Push()
 }
 
@@ -68,6 +73,7 @@ func (s *Store) Push() error {
 		return err
 	}
 	defer lock.Close()
+
 	err = s.commitState()
 	if err == nil {
 		// Never ask for a password: this runs in the background.
@@ -75,14 +81,17 @@ func (s *Store) Push() error {
 		_, err = s.gitEnv(env, nil, "push", "--quiet", backupRemote,
 			"HEAD:refs/heads/config", "refs/heads/state:refs/heads/state", "refs/checkpoints/*:refs/checkpoints/*")
 	}
+
 	st := PushStatus{Remote: url, Time: time.Now()}
 	if err != nil {
 		st.Error = err.Error()
 	}
+
 	b, _ := json.Marshal(st)
 	if werr := os.WriteFile(s.path("push.json"), b, 0o600); werr != nil && err == nil {
 		err = werr
 	}
+
 	return err
 }
 
@@ -91,10 +100,12 @@ func (s *Store) LastPush() *PushStatus {
 	if err != nil {
 		return nil
 	}
+
 	var st PushStatus
 	if json.Unmarshal(b, &st) != nil {
 		return nil
 	}
+
 	return &st
 }
 
@@ -108,39 +119,51 @@ func (s *Store) commitState() error {
 			}
 		}
 	}
+
 	var tree strings.Builder
+
 	for _, name := range stateFiles {
 		body, err := os.ReadFile(s.path(name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
+
 		if err != nil {
 			return err
 		}
+
 		blob, err := s.git(body, "hash-object", "-w", "--stdin")
 		if err != nil {
 			return err
 		}
+
 		fmt.Fprintf(&tree, "100644 blob %s\t%s\n", strings.TrimSpace(string(blob)), name)
 	}
+
 	treeID, err := s.git([]byte(tree.String()), "mktree")
 	if err != nil {
 		return err
 	}
+
 	treeSHA := strings.TrimSpace(string(treeID))
 	args := []string{"commit-tree", treeSHA, "-m", "syschange state"}
+
 	if parent, err := s.git(nil, "rev-parse", "--verify", "--quiet", "refs/heads/state"); err == nil {
 		p := strings.TrimSpace(string(parent))
 		if old, err := s.git(nil, "rev-parse", p+"^{tree}"); err == nil && strings.TrimSpace(string(old)) == treeSHA {
 			return nil
 		}
+
 		args = append(args, "-p", p)
 	}
+
 	commit, err := s.git(nil, args...)
 	if err != nil {
 		return err
 	}
+
 	_, err = s.git(nil, "update-ref", "refs/heads/state", strings.TrimSpace(string(commit)))
+
 	return err
 }
 
@@ -150,7 +173,9 @@ func spawnPush() {
 	if err != nil {
 		return
 	}
+
 	cmd := exec.Command(exe, "push", "--quiet")
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if cmd.Start() == nil {
 		go cmd.Wait()

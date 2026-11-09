@@ -31,6 +31,7 @@ func firstNonEmpty(a, b string) string {
 	if a != "" {
 		return a
 	}
+
 	return b
 }
 
@@ -42,6 +43,7 @@ func (s *Store) SessionStartHook(agent string, stdin io.Reader) error {
 	if json.NewDecoder(stdin).Decode(&in) != nil || in.session() == "" || !s.Initialized() || suggesting() {
 		return nil
 	}
+
 	dir := s.path("sessions")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -51,7 +53,9 @@ func (s *Store) SessionStartHook(agent string, stdin io.Reader) error {
 	if _, err := os.Stat(file); err == nil {
 		return nil
 	}
+
 	pruneSessions(dir)
+
 	return os.WriteFile(file, []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0o600)
 }
 
@@ -60,8 +64,10 @@ func (s *Store) sessionFile(agent, id string) string {
 		if r == '/' || r == os.PathSeparator || r == 0 {
 			return '_'
 		}
+
 		return r
 	}, id)
+
 	return filepath.Join(s.path("sessions"), agent+"-"+safe)
 }
 
@@ -86,10 +92,12 @@ func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error 
 	if in.StopActive || in.StopActiveCaml || !s.Initialized() || suggesting() {
 		return nil
 	}
+
 	started, ok := s.sessionStarted(agent, in)
 	if !ok {
 		return nil
 	}
+
 	pending, err := s.Pending()
 	if err != nil {
 		return err
@@ -98,7 +106,9 @@ func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error 
 	// them (older setups), fall back to everything changed since it started.
 	s.Attribute(pending)
 	tracked := slices.ContainsFunc(s.windows(), func(w window) bool { return w.Agent == agent && w.Session == in.session() })
+
 	var mine []Change
+
 	for _, c := range pending {
 		if tracked {
 			if c.By == agent && c.Session == in.session() {
@@ -108,20 +118,26 @@ func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error 
 			mine = append(mine, c)
 		}
 	}
+
 	if len(mine) == 0 {
 		return nil
 	}
+
 	var b strings.Builder
 	b.WriteString("You changed this system during the session. Before finishing, record why, one short line per logical change:\n")
+
 	for _, c := range mine {
 		fmt.Fprintf(&b, "- %s %s (%s)\n", c.Op, c.ID, c.Label)
 	}
+
 	fmt.Fprintf(&b, "\nRun: syschange note --by %s \"<why, in the user's language>\" <id>...\n", agent)
 	b.WriteString("If one of these is not yours, leave it out. To keep a path out of the history for good: syschange ignore <path>.")
+
 	decision := "block"
 	if agent == "gemini" {
 		decision = "deny" // Gemini's AfterAgent retries the turn with the reason as the prompt
 	}
+
 	return json.NewEncoder(stdout).Encode(map[string]string{"decision": decision, "reason": b.String()})
 }
 
@@ -139,6 +155,7 @@ func (s *Store) sessionStarted(agent string, in hookInput) (time.Time, bool) {
 			}
 		}
 	}
+
 	return sessionStart(in.transcript())
 }
 
@@ -149,8 +166,10 @@ func sessionStart(path string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	defer f.Close()
+
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64<<10), 16<<20)
+
 	for sc.Scan() {
 		var line struct {
 			Timestamp time.Time `json:"timestamp"`
@@ -159,6 +178,7 @@ func sessionStart(path string) (time.Time, bool) {
 			return line.Timestamp, true
 		}
 	}
+
 	return time.Time{}, false
 }
 
@@ -167,6 +187,7 @@ func sessionStart(path string) (time.Time, bool) {
 func changedSince(s *Store, c Change, t time.Time) bool {
 	// File times come from a coarse clock and pacman stores whole seconds.
 	t = t.Add(-time.Second)
+
 	switch c.Kind {
 	case "config":
 		info, err := os.Lstat(s.realPath(c.Name))
@@ -174,6 +195,7 @@ func changedSince(s *Store, c Change, t time.Time) bool {
 	case "package":
 		return c.Op == "added" && packageInstalledAfter(c.Name, t)
 	}
+
 	return false
 }
 
@@ -191,13 +213,17 @@ func packageInstallTime(name string) (time.Time, bool) {
 		if err != nil {
 			continue
 		}
+
 		fields := strings.Split(string(desc), "\n")
 		if field(fields, "%NAME%") != name {
 			continue
 		}
+
 		sec, err := strconv.ParseInt(field(fields, "%INSTALLDATE%"), 10, 64)
+
 		return time.Unix(sec, 0), err == nil
 	}
+
 	return time.Time{}, false
 }
 
@@ -207,5 +233,6 @@ func field(lines []string, key string) string {
 			return lines[i+1]
 		}
 	}
+
 	return ""
 }

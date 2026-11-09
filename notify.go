@@ -34,6 +34,7 @@ var sendNotification = func(n Notification) error {
 	if err != nil {
 		return err
 	}
+
 	return conn.Object("org.freedesktop.Notifications", "/org/freedesktop/Notifications").Call(
 		"org.freedesktop.Notifications.Notify", 0,
 		"System changes", uint32(0), "document-open-recent", n.Summary, n.Body,
@@ -49,6 +50,7 @@ func (s *Store) OldestPending(pending []Change) time.Time {
 			oldest = t
 		}
 	}
+
 	return oldest
 }
 
@@ -59,7 +61,9 @@ func (s *Store) Notify(now time.Time, remindDays int, digest bool) ([]Notificati
 	if b, err := os.ReadFile(s.path("notified.json")); err == nil {
 		json.Unmarshal(b, &sent)
 	}
+
 	before := sent
+
 	var out []Notification
 
 	if remindDays > 0 && sent.Remind != now.Format(time.DateOnly) {
@@ -67,11 +71,13 @@ func (s *Store) Notify(now time.Time, remindDays int, digest bool) ([]Notificati
 		if err != nil {
 			return nil, err
 		}
+
 		if oldest := s.OldestPending(pending); !oldest.IsZero() && now.Sub(oldest) >= time.Duration(remindDays)*24*time.Hour {
 			var titles []string
 			for _, g := range Groups(pending) {
 				titles = append(titles, g.Title)
 			}
+
 			days := int(now.Sub(oldest).Hours() / 24)
 			out = append(out, Notification{
 				Summary: fmt.Sprintf("%d system change(s) not recorded for %d days", len(pending), days),
@@ -86,13 +92,16 @@ func (s *Store) Notify(now time.Time, remindDays int, digest bool) ([]Notificati
 		// Last week is Monday to Monday, whenever this first runs in the new week.
 		day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		monday := day.AddDate(0, 0, -(int(day.Weekday())+6)%7)
+
 		history, err := s.History()
 		if err != nil {
 			return nil, err
 		}
+
 		if body := Digest(history, monday.AddDate(0, 0, -7), monday); body != "" {
 			out = append(out, Notification{Summary: "Your setup last week", Body: body})
 		}
+
 		sent.Digest = thisWeek
 	}
 
@@ -102,36 +111,47 @@ func (s *Store) Notify(now time.Time, remindDays int, digest bool) ([]Notificati
 			return nil, err
 		}
 	}
+
 	return out, nil
 }
 
 // Digest sums up the entries recorded in [from, to), or "" when there are none.
 func Digest(history []Entry, from, to time.Time) string {
 	var entries []Entry
+
 	for _, e := range history {
 		if !e.Time.Before(from) && e.Time.Before(to) {
 			entries = append(entries, e)
 		}
 	}
+
 	if len(entries) == 0 {
 		return ""
 	}
+
 	apps := map[string]int{}
+
 	var installed, removed, enabled, disabled []string
+
 	authors := map[string]int{}
 	undescribed := 0
 	changes := 0
+
 	for _, e := range entries {
 		if e.Note == "" {
 			undescribed++
 		}
+
 		by := e.By
 		if by == "" {
 			by = "you"
 		}
+
 		authors[by]++
+
 		for _, c := range e.Changes {
 			changes++
+
 			switch {
 			case c.Kind == "package" && c.Op == "added":
 				installed = append(installed, c.Name)
@@ -147,23 +167,29 @@ func Digest(history []Entry, from, to time.Time) string {
 			}
 		}
 	}
+
 	lines := []string{fmt.Sprintf("%d entries, %d changes.", len(entries), changes)}
 	if len(apps) > 0 {
 		names := slices.SortedFunc(maps.Keys(apps), func(a, b string) int {
 			if d := apps[b] - apps[a]; d != 0 {
 				return d
 			}
+
 			return strings.Compare(a, b)
 		})
+
 		var parts []string
 		for _, n := range names[:min(len(names), 5)] {
 			parts = append(parts, fmt.Sprintf("%s (%d)", n, apps[n]))
 		}
+
 		if len(names) > 5 {
 			parts = append(parts, fmt.Sprintf("%d more", len(names)-5))
 		}
+
 		lines = append(lines, "Config: "+strings.Join(parts, ", ")+".")
 	}
+
 	for _, l := range []struct {
 		label string
 		names []string
@@ -172,16 +198,20 @@ func Digest(history []Entry, from, to time.Time) string {
 			lines = append(lines, l.label+": "+shortList(l.names)+".")
 		}
 	}
+
 	if len(authors) > 1 || authors["you"] == 0 {
 		var parts []string
 		for _, by := range slices.Sorted(maps.Keys(authors)) {
 			parts = append(parts, fmt.Sprintf("%s %d", by, authors[by]))
 		}
+
 		lines = append(lines, "By: "+strings.Join(parts, ", ")+".")
 	}
+
 	if undescribed > 0 {
 		lines = append(lines, fmt.Sprintf("%d without a description.", undescribed))
 	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -191,6 +221,7 @@ func unitName(line string) string {
 	if !ok {
 		return line
 	}
+
 	return name
 }
 
@@ -198,5 +229,6 @@ func shortList(names []string) string {
 	if len(names) <= 6 {
 		return strings.Join(names, ", ")
 	}
+
 	return strings.Join(names[:6], ", ") + fmt.Sprintf(" and %d more", len(names)-6)
 }

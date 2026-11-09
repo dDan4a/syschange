@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,29 +28,37 @@ func newCLI(t *testing.T) *cli {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("CLAUDECODE", "")
 	t.Setenv("GEMINI_CLI", "")
+
 	old := newStore
 	newStore = func() (*Store, error) { return s, nil }
+
 	t.Cleanup(func() { newStore = old })
+
 	return &cli{t: t, s: s}
 }
 
 func (c *cli) run(stdin string, args ...string) (string, error) {
 	var out bytes.Buffer
+
 	err := run(args, strings.NewReader(stdin), &out)
+
 	return out.String(), err
 }
 
 func (c *cli) ok(args ...string) string {
 	c.t.Helper()
+
 	out, err := c.run("", args...)
 	if err != nil {
 		c.t.Fatalf("syschange %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
+
 	return out
 }
 
 func (c *cli) fails(want string, args ...string) {
 	c.t.Helper()
+
 	_, err := c.run("", args...)
 	if err == nil || !strings.Contains(err.Error(), want) {
 		c.t.Fatalf("syschange %s: err = %v, want it to mention %q", strings.Join(args, " "), err, want)
@@ -58,6 +67,7 @@ func (c *cli) fails(want string, args ...string) {
 
 func must(t *testing.T, out, want string) {
 	t.Helper()
+
 	if !strings.Contains(out, want) {
 		t.Fatalf("output lacks %q:\n%s", want, out)
 	}
@@ -74,11 +84,16 @@ func TestCLIBasics(t *testing.T) {
 	must(t, c.ok("status"), "Nothing new")
 	must(t, c.ok("digest", "--days", "3"), "Nothing recorded in the last 3 days")
 	must(t, c.ok("notify", "--no-digest"), "[]")
+
 	var shown []Notification
+
 	old := sendNotification
+
 	sendNotification = func(n Notification) error { shown = append(shown, n); return nil }
 	defer func() { sendNotification = old }()
+
 	write(t, c.s.ConfigDir, "kitty/kitty.conf", "x\n")
+
 	if out := c.ok("notify", "--send", "--remind-days", "0"); out != "" || len(shown) != 0 {
 		t.Fatalf("nothing due must show nothing: %q %v", out, shown)
 	}
@@ -99,6 +114,7 @@ func TestCLIRecordFlow(t *testing.T) {
 	must(t, out, "~ Key bindings  +1 -1")
 	must(t, c.ok("diff", "hypr"), "+bind = SUPER, R, exec, voxtype")
 	must(t, c.ok("diff", "--color", "kitty"), "\x1b[")
+
 	if !strings.Contains(c.ok("status", "--json"), `"oldestPending"`) {
 		t.Fatal("status --json lacks oldestPending")
 	}
@@ -117,23 +133,28 @@ func TestCLIRecordFlow(t *testing.T) {
 	if out := c.ok("log", "--grep", "voice"); !strings.Contains(out, "Voice typing") || strings.Contains(out, "no description") {
 		t.Fatalf("grep voice:\n%s", out)
 	}
+
 	must(t, c.ok("log", "--grep", "codex"), "Voice typing")
 	must(t, c.ok("log", "--grep", "VOXTYPE"), "Voice typing")
+
 	if out := c.ok("log", "--grep", "font_size"); !strings.Contains(out, "no description") || strings.Contains(out, "Voice") {
 		t.Fatalf("grep diff line:\n%s", out)
 	}
+
 	if out := c.ok("log", "--json", "--grep", "nothing like it"); strings.TrimSpace(out) != "[]" {
 		t.Fatalf("no match must be []: %q", out)
 	}
 
 	// undo by commit, then the log shows it undone
 	var entry Entry
+
 	h, _ := c.s.History()
 	for _, e := range h {
 		if e.Note == "Voice typing" {
 			entry = e
 		}
 	}
+
 	c.fails("undo takes a history entry", "undo")
 	must(t, c.ok("undo", entry.Commit), "Undid 1 config change(s)")
 	must(t, c.ok("log"), "(undone)")
@@ -142,9 +163,11 @@ func TestCLIRecordFlow(t *testing.T) {
 	// revert and ignore
 	write(t, c.s.ConfigDir, "hypr/bindings.conf", "changed again\n")
 	c.fails("revert needs", "revert")
+
 	if out, err := c.run("", "revert", "hypr/bindings.conf"); err != nil || out != "" {
 		t.Fatalf("revert: %q %v", out, err)
 	}
+
 	write(t, c.s.ConfigDir, "noisy/state.json", "{}\n")
 	c.fails("ignore takes one", "ignore")
 	c.ok("ignore", "noisy/")
@@ -160,6 +183,7 @@ func TestCLICheckpointsAndExport(t *testing.T) {
 	c.fails("restore takes", "restore")
 	c.fails("no checkpoint", "restore", "missing")
 	must(t, c.ok("restore", "before", "anim"), "Config files restored")
+
 	if b, _ := os.ReadFile(filepath.Join(c.s.ConfigDir, "hypr/bindings.conf")); string(b) != "at checkpoint\n" {
 		t.Fatalf("restore: %q", b)
 	}
@@ -167,14 +191,18 @@ func TestCLICheckpointsAndExport(t *testing.T) {
 	must(t, c.ok("export"), "# System changes")
 	file := filepath.Join(t.TempDir(), "out.md")
 	must(t, c.ok("export", "--to", file), "Exported to")
+
 	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("a new export must be private: %v %v", info, err)
 	}
+
 	os.Chmod(file, 0o640)
 	must(t, c.ok("export", "--to", file), "Exported to")
+
 	if info, _ := os.Stat(file); info.Mode().Perm() != 0o640 {
 		t.Fatalf("export changed the file's mode to %v", info.Mode())
 	}
+
 	must(t, c.ok("export", "--auto", file), "kept up to date")
 	must(t, c.ok("export", "--auto", "off"), "Auto export is off")
 	c.fails("inside", "export", "--auto", filepath.Join(c.s.ConfigDir, "x.md"))
@@ -185,14 +213,17 @@ func TestCLIRemoteAndApply(t *testing.T) {
 	must(t, c.ok("remote"), "No backup remote")
 	c.fails("no backup remote", "push")
 	c.fails("usage: syschange remote", "remote", "bogus")
+
 	remote := filepath.Join(t.TempDir(), "b.git")
 	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
 	must(t, c.ok("remote", "set", remote), "Keep that repository private")
 	must(t, c.ok("remote"), "last push")
 	must(t, c.ok("push"), "Pushed to")
+
 	if out := c.ok("push", "--quiet"); out != "" {
 		t.Fatalf("quiet push printed %q", out)
 	}
+
 	must(t, c.ok("remote", "off"), "Backup is off")
 
 	c.fails("usage: syschange apply", "apply")
@@ -204,6 +235,7 @@ func TestCLIRemoteAndApply(t *testing.T) {
 	// A plan with work needs --yes when not on a terminal.
 	other := filepath.Join(t.TempDir(), "o.git")
 	exec.Command("git", "init", "--bare", "--quiet", other).Run()
+
 	a, _ := newTestStore(t)
 	write(t, a.ConfigDir, "kitty/kitty.conf", "x\n")
 	a.Record(nil, "kitty", "")
@@ -219,26 +251,34 @@ func TestCLIHooksAndAgents(t *testing.T) {
 	c.ok("hook", "claude", "start") // empty input: ignored, never an error
 	c.ok("hook", "claude")          // same for the stop hook
 	c.ok("hook", "claude", "pre")
+
 	if _, err := c.run(`{"session_id":"s"}`, "hook", "claude", "start"); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := c.run(`{"session_id":"s","tool_use_id":"1"}`, "hook", "claude", "pre"); err != nil {
 		t.Fatal(err)
 	}
+
 	write(t, c.s.ConfigDir, "hypr/bindings.conf", "by the agent\n")
+
 	if _, err := c.run(`{"session_id":"s","tool_use_id":"1"}`, "hook", "claude", "post"); err != nil {
 		t.Fatal(err)
 	}
+
 	out, err := c.run(`{"session_id":"s"}`, "hook", "claude")
 	if err != nil || !strings.Contains(out, "hypr/bindings.conf") {
 		t.Fatalf("stop hook: %q %v", out, err)
 	}
+
 	must(t, c.ok("status"), "[claude]")
+
 	if _, err := c.run("", "hook", "omarchy", "theme-set", "x"); err != nil {
 		t.Fatal(err)
 	}
 
 	home := os.Getenv("HOME")
+
 	must(t, c.ok("agents"), "No supported agent")
 	c.fails("no supported agent", "agents", "install")
 	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
@@ -247,11 +287,14 @@ func TestCLIHooksAndAgents(t *testing.T) {
 	must(t, c.ok("agents", "status"), "claude (Omarchy default): not connected")
 	must(t, c.ok("agents", "install", "claude"), "Connected: claude")
 	must(t, c.ok("agents"), "claude (Omarchy default): connected")
+
 	var st statusJSON
 	json.Unmarshal([]byte(c.ok("status", "--json")), &st)
+
 	if len(st.Agents) != 1 || !st.Agents[0].Connected || !st.Agents[0].Default {
 		t.Fatalf("agents in status %+v", st.Agents)
 	}
+
 	must(t, c.ok("agents", "remove"), "Disconnected")
 	c.fails("unknown agents action", "agents", "bogus")
 }
@@ -285,8 +328,11 @@ func TestCLISuggestAll(t *testing.T) {
 	write(t, c.s.ConfigDir, "hypr/bindings.conf", "x\n")
 	write(t, c.s.ConfigDir, "mako/config", "x\n")
 	write(t, c.s.ConfigDir, "waybar/config", "x\n")
+
 	var shown []Notification
+
 	old := sendNotification
+
 	sendNotification = func(n Notification) error { shown = append(shown, n); return nil }
 	defer func() { sendNotification = old }()
 
@@ -294,9 +340,11 @@ func TestCLISuggestAll(t *testing.T) {
 	for _, want := range []string{"Hyprland: AI line", "Mako: AI line", "Waybar: failed", "Described 2 of 3."} {
 		must(t, out, want)
 	}
+
 	if len(shown) != 1 || shown[0].Summary != "Described 2 of 3" || !strings.Contains(shown[0].Body, "Mako: AI line") {
 		t.Fatalf("notification %+v", shown)
 	}
+
 	must(t, c.ok("log"), "AI line  [grok]")
 	must(t, c.ok("status"), "Waybar")
 	c.fails("no change could be described:\nWaybar: failed", "suggest", "--all", "--agent", "grok")
@@ -308,17 +356,22 @@ func TestCLINotInitialized(t *testing.T) {
 		ListPackages: func() ([]string, error) { return nil, nil }, ListUnits: func() ([]string, error) { return nil, nil }}
 	old := newStore
 	newStore = func() (*Store, error) { return s, nil }
+
 	t.Cleanup(func() { newStore = old })
+
 	var out bytes.Buffer
-	if err := run([]string{"status"}, strings.NewReader(""), &out); err != ErrNotInitialized {
+	if err := run([]string{"status"}, strings.NewReader(""), &out); !errors.Is(err, ErrNotInitialized) {
 		t.Fatalf("status: %v", err)
 	}
+
 	out.Reset()
+
 	if err := run([]string{"status", "--json"}, strings.NewReader(""), &out); err != nil || !strings.Contains(out.String(), `"initialized":false`) {
 		t.Fatalf("status --json: %q %v", out.String(), err)
 	}
+
 	for _, args := range [][]string{{"export"}, {"ignore", "x"}, {"remote", "set", "x"}, {"checkpoint"}, {"export", "--auto", "f"}} {
-		if err := run(args, strings.NewReader(""), &bytes.Buffer{}); err != ErrNotInitialized {
+		if err := run(args, strings.NewReader(""), &bytes.Buffer{}); !errors.Is(err, ErrNotInitialized) {
 			t.Errorf("%v: %v", args, err)
 		}
 	}
@@ -328,16 +381,21 @@ func TestPackageInstallTime(t *testing.T) {
 	db := t.TempDir()
 	old := pacmanDB
 	pacmanDB = db
+
 	t.Cleanup(func() { pacmanDB = old })
+
 	when := time.Now().Add(-time.Hour).Unix()
 	write(t, db, "voxtype-1.0-1/desc", "%NAME%\nvoxtype\n\n%INSTALLDATE%\n"+itoa(when)+"\n")
 	write(t, db, "voxtype-extra-2.0-1/desc", "%NAME%\nvoxtype-extra\n\n%INSTALLDATE%\n1\n")
+
 	if at, ok := packageInstallTime("voxtype"); !ok || at.Unix() != when {
 		t.Fatalf("install time %v %v", at, ok)
 	}
+
 	if _, ok := packageInstallTime("missing"); ok {
 		t.Fatal("missing package has an install time")
 	}
+
 	if !packageInstalledAfter("voxtype", time.Now().Add(-2*time.Hour)) || packageInstalledAfter("voxtype", time.Now()) {
 		t.Fatal("packageInstalledAfter")
 	}
@@ -349,6 +407,7 @@ func itoa(n int64) string {
 
 func TestCommandsForUndoAndRepeat(t *testing.T) {
 	pkg := func(op, name string) Change { return itemChange("package", op, name) }
+
 	unit := func(op, name string) Change { return itemChange("unit", op, name) }
 	for _, tc := range []struct {
 		c          Change
@@ -362,11 +421,14 @@ func TestCommandsForUndoAndRepeat(t *testing.T) {
 		if got := undoCommand(tc.c); got != tc.undo {
 			t.Errorf("undo %s: %q", tc.c.ID, got)
 		}
+
 		if got := redo(tc.c); got != tc.redo {
 			t.Errorf("redo %s: %q", tc.c.ID, got)
 		}
 	}
+
 	got := repeatCommands([]Change{pkg("added", "a"), pkg("added", "b-bin"), pkg("removed", "c"), unit("added", "user d.service")}, []string{"b-bin"})
+
 	want := []string{"sudo pacman -S --needed a", "systemctl --user enable d.service", "yay -S --needed b-bin", "sudo pacman -Rns c"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("repeat %q", got)

@@ -9,6 +9,25 @@ import (
 	"strings"
 )
 
+const (
+	kindConfig  = "config"
+	kindPackage = "package"
+	kindUnit    = "unit"
+
+	opAdded    = "added"
+	opModified = "modified"
+	opRemoved  = "removed"
+
+	groupPackages = "packages"
+	groupServices = "services"
+
+	scopeSystem = "system"
+	scopeUser   = "user"
+
+	packagesList = "packages"
+	unitsList    = "units"
+)
+
 // Change is one pending difference from the accepted state.
 type Change struct {
 	ID      string `json:"id"`   // "hypr/bindings.conf", "pkg:voxtype", "unit:user ydotool.service"
@@ -53,7 +72,7 @@ func (s *Store) Pending() ([]Change, error) {
 	for _, src := range []struct {
 		kind, file string
 		list       func() ([]string, error)
-	}{{"package", "packages.txt", s.ListPackages}, {"unit", "units.txt", s.ListUnits}} {
+	}{{kindPackage, packagesList + ".txt", s.ListPackages}, {kindUnit, unitsList + ".txt", s.ListUnits}} {
 		accepted, err := readLines(s.path(src.file))
 		if err != nil {
 			return nil, err
@@ -97,20 +116,20 @@ func (s *Store) configChanges() ([]Change, error) {
 
 		switch {
 		case code == "??":
-			op = "added"
+			op = opAdded
 			stat[path] = [2]int{countLines(filepath.Join(s.ConfigDir, path)), 0}
 		case strings.Contains(code, "D"):
-			op = "removed"
+			op = opRemoved
 		default:
-			op = "modified"
+			op = opModified
 		}
 
-		if op != "removed" && !s.trackable(path) {
+		if op != opRemoved && !s.trackable(path) {
 			continue
 		}
 
 		changes = append(changes, Change{
-			ID: path, Kind: "config", Op: op, Name: path, Label: fileLabel(path),
+			ID: path, Kind: kindConfig, Op: op, Name: path, Label: fileLabel(path),
 			Added: stat[path][0], Removed: stat[path][1],
 		})
 	}
@@ -159,13 +178,13 @@ func setChanges(kind string, accepted, now []string) []Change {
 
 	for _, name := range now {
 		if !slices.Contains(accepted, name) {
-			changes = append(changes, itemChange(kind, "added", name))
+			changes = append(changes, itemChange(kind, opAdded, name))
 		}
 	}
 
 	for _, name := range accepted {
 		if !slices.Contains(now, name) {
-			changes = append(changes, itemChange(kind, "removed", name))
+			changes = append(changes, itemChange(kind, opRemoved, name))
 		}
 	}
 
@@ -176,12 +195,12 @@ func itemChange(kind, op, name string) Change {
 	prefix := "pkg:"
 	label := name
 
-	if kind == "unit" {
+	if kind == kindUnit {
 		prefix = "unit:"
 		// "user ydotool.service" -> "ydotool.service (user)"
 		if scope, unit, ok := strings.Cut(name, " "); ok {
 			label = unit
-			if scope == "user" {
+			if scope == scopeUser {
 				label += " (user)"
 			}
 		}
@@ -211,9 +230,9 @@ func Groups(changes []Change) []Group {
 
 	rank := func(g Group) int {
 		switch g.Key {
-		case "packages":
+		case groupPackages:
 			return 1
-		case "services":
+		case groupServices:
 			return 2
 		}
 
@@ -233,10 +252,10 @@ func Groups(changes []Change) []Group {
 
 func groupOf(c Change) (key, title string) {
 	switch c.Kind {
-	case "package":
-		return "packages", "Packages"
-	case "unit":
-		return "services", "Services"
+	case kindPackage:
+		return groupPackages, "Packages"
+	case kindUnit:
+		return groupServices, "Services"
 	}
 
 	if rel, ok := strings.CutPrefix(c.Name, homePrefix); ok {
@@ -263,8 +282,8 @@ func Select(changes []Change, items []string) []Change {
 
 		for _, it := range items {
 			it = strings.TrimSuffix(it, "/")
-			if it == c.ID || it == key || (c.Kind != "config" && it == c.Name) ||
-				(c.Kind == "config" && strings.HasPrefix(c.Name, it+"/")) {
+			if it == c.ID || it == key || (c.Kind != kindConfig && it == c.Name) ||
+				(c.Kind == kindConfig && strings.HasPrefix(c.Name, it+"/")) {
 				out = append(out, c)
 				break
 			}
@@ -274,6 +293,7 @@ func Select(changes []Change, items []string) []Change {
 	return out
 }
 
+//nolint:goconst // directory names under ~/.config; equal subcommand and author names are a coincidence
 var apps = map[string]string{
 	"hypr": "Hyprland", "omarchy": "Omarchy", "alacritty": "Alacritty", "ghostty": "Ghostty",
 	"kitty": "Kitty", "foot": "Foot", "walker": "Walker", "elephant": "Elephant", "mako": "Mako",

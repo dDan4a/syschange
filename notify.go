@@ -59,7 +59,7 @@ func (s *Store) OldestPending(pending []Change) time.Time {
 func (s *Store) Notify(now time.Time, remindDays int, digest bool) ([]Notification, error) {
 	var sent notified
 	if b, err := os.ReadFile(s.path("notified.json")); err == nil {
-		json.Unmarshal(b, &sent)
+		_ = json.Unmarshal(b, &sent)
 	}
 
 	before := sent
@@ -106,7 +106,11 @@ func (s *Store) Notify(now time.Time, remindDays int, digest bool) ([]Notificati
 	}
 
 	if sent != before {
-		b, _ := json.Marshal(sent)
+		b, err := json.Marshal(sent)
+		if err != nil {
+			return nil, err
+		}
+
 		if err := writeAtomic(s.path("notified.json"), b, 0o600); err != nil {
 			return nil, err
 		}
@@ -153,13 +157,13 @@ func Digest(history []Entry, from, to time.Time) string {
 			changes++
 
 			switch {
-			case c.Kind == "package" && c.Op == "added":
+			case c.Kind == kindPackage && c.Op == opAdded:
 				installed = append(installed, c.Name)
-			case c.Kind == "package":
+			case c.Kind == kindPackage:
 				removed = append(removed, c.Name)
-			case c.Kind == "unit" && c.Op == "added":
+			case c.Kind == kindUnit && c.Op == opAdded:
 				enabled = append(enabled, unitName(c.Name))
-			case c.Kind == "unit":
+			case c.Kind == kindUnit:
 				disabled = append(disabled, unitName(c.Name))
 			default:
 				_, title := groupOf(c)

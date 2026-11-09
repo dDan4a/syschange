@@ -5,6 +5,12 @@ run:
 
 linters:
   settings:
+    errcheck:
+      # command output goes to stdout or a bytes.Buffer; a failed stdout write is not actionable, like fmt.Printf
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     lll:
       line-length: 150
       tab-width: 4

@@ -15,6 +15,8 @@ import (
 
 // hookInput is what Claude Code, Codex and Gemini CLI send (snake_case) and
 // what Grok sends (camelCase).
+//
+//nolint:tagliatelle // field names are set by the agents, Grok sends camelCase
 type hookInput struct {
 	SessionID      string `json:"session_id"`
 	SessionIDCamel string `json:"sessionId"`
@@ -41,7 +43,7 @@ func (s *Store) SessionStartHook(agent string, stdin io.Reader) error {
 	var in hookInput
 	// Hooks fail open: bad input never breaks the agent.
 	if json.NewDecoder(stdin).Decode(&in) != nil || in.session() == "" || !s.Initialized() || suggesting() {
-		return nil
+		return nil //nolint:nilerr // fail open
 	}
 
 	dir := s.path("sessions")
@@ -75,7 +77,7 @@ func pruneSessions(dir string) {
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
 		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > 30*24*time.Hour {
-			os.Remove(filepath.Join(dir, e.Name()))
+			_ = os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
 }
@@ -86,7 +88,7 @@ func pruneSessions(dir string) {
 func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error {
 	var in hookInput
 	if json.NewDecoder(stdin).Decode(&in) != nil {
-		return nil // fail open
+		return nil //nolint:nilerr // fail open
 	}
 	// Asked once already: never trap the agent in a loop.
 	if in.StopActive || in.StopActiveCaml || !s.Initialized() || suggesting() {
@@ -134,7 +136,7 @@ func (s *Store) StopHook(agent string, stdin io.Reader, stdout io.Writer) error 
 	b.WriteString("If one of these is not yours, leave it out. To keep a path out of the history for good: syschange ignore <path>.")
 
 	decision := "block"
-	if agent == "gemini" {
+	if agent == agentGemini {
 		decision = "deny" // Gemini's AfterAgent retries the turn with the reason as the prompt
 	}
 
@@ -165,7 +167,7 @@ func sessionStart(path string) (time.Time, bool) {
 	if err != nil {
 		return time.Time{}, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64<<10), 16<<20)
@@ -189,11 +191,11 @@ func changedSince(s *Store, c Change, t time.Time) bool {
 	t = t.Add(-time.Second)
 
 	switch c.Kind {
-	case "config":
+	case kindConfig:
 		info, err := os.Lstat(s.realPath(c.Name))
 		return err == nil && info.ModTime().After(t)
-	case "package":
-		return c.Op == "added" && packageInstalledAfter(c.Name, t)
+	case kindPackage:
+		return c.Op == opAdded && packageInstalledAfter(c.Name, t)
 	}
 
 	return false

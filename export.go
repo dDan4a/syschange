@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -38,7 +39,7 @@ func (s *Store) Export(w io.Writer) error {
 
 	if out, err := s.git(nil, "log", "--reverse", "--format=%cI", "--max-parents=0", "HEAD"); err == nil {
 		if t, err := time.Parse(time.RFC3339, strings.TrimSpace(string(out))); err == nil {
-			since = ", tracked since " + t.Local().Format("2006-01-02")
+			since = ", tracked since " + t.Local().Format("2006-01-02") //nolint:gosmopolitan // the export is read in the user's own time zone
 		}
 	}
 
@@ -59,7 +60,7 @@ func (s *Store) Export(w io.Writer) error {
 
 	day := ""
 	for _, e := range history {
-		if d := e.Time.Local().Format("2006-01-02"); d != day {
+		if d := e.Time.Local().Format("2006-01-02"); d != day { //nolint:gosmopolitan // the export is read in the user's own time zone
 			day = d
 			fmt.Fprintf(w, "\n### %s\n\n", d)
 		}
@@ -77,7 +78,7 @@ func (s *Store) Export(w io.Writer) error {
 			note += " · _" + who + "_"
 		}
 
-		fmt.Fprintf(w, "- **%s** %s\n", e.Time.Local().Format("15:04"), note)
+		fmt.Fprintf(w, "- **%s** %s\n", e.Time.Local().Format("15:04"), note) //nolint:gosmopolitan // the export is read in the user's own time zone
 
 		for _, g := range Groups(e.Changes) {
 			for _, c := range g.Changes {
@@ -93,10 +94,10 @@ func (s *Store) Export(w io.Writer) error {
 func changeLine(app string, c Change) string {
 	line := app + ": " + c.Label
 	switch c.Kind {
-	case "package":
-		line = map[string]string{"added": "Installed ", "removed": "Removed "}[c.Op] + c.Label
-	case "unit":
-		line = map[string]string{"added": "Enabled ", "removed": "Disabled "}[c.Op] + c.Label
+	case kindPackage:
+		line = map[string]string{opAdded: "Installed ", opRemoved: "Removed "}[c.Op] + c.Label
+	case kindUnit:
+		line = map[string]string{opAdded: "Enabled ", opRemoved: "Disabled "}[c.Op] + c.Label
 	default:
 		line += " (`" + c.Name + "`), " + c.Op
 	}
@@ -127,7 +128,7 @@ func entryAuthors(e Entry) string {
 func (s *Store) exportRepeat(w io.Writer) error {
 	var cmds []string
 
-	for _, kind := range []struct{ name, file string }{{"package", "packages"}, {"unit", "units"}} {
+	for _, kind := range []struct{ name, file string }{{kindPackage, packagesList}, {kindUnit, unitsList}} {
 		base, err := readLines(s.path(kind.file + ".init.txt"))
 		if err != nil {
 			return err
@@ -191,11 +192,11 @@ func repeatCommands(changes []Change, aur []string) []string {
 
 	for _, c := range changes {
 		switch {
-		case c.Kind == "package" && c.Op == "added" && slices.Contains(aur, c.Name):
+		case c.Kind == kindPackage && c.Op == opAdded && slices.Contains(aur, c.Name):
 			fromAUR = append(fromAUR, c.Name)
-		case c.Kind == "package" && c.Op == "added":
+		case c.Kind == kindPackage && c.Op == opAdded:
 			repo = append(repo, c.Name)
-		case c.Kind == "package":
+		case c.Kind == kindPackage:
 			remove = append(remove, c.Name)
 		default:
 			cmds = append(cmds, redo(c))
@@ -219,7 +220,7 @@ func repeatCommands(changes []Change, aur []string) []string {
 
 // foreignPackages are installed packages not from a repository (AUR).
 func foreignPackages() []string {
-	out, err := exec.Command("pacman", "-Qqm").Output()
+	out, err := exec.CommandContext(context.Background(), "pacman", "-Qqm").Output()
 	if err != nil {
 		return nil
 	}
@@ -228,26 +229,15 @@ func foreignPackages() []string {
 }
 
 func redo(c Change) string {
-	if c.Kind == "package" {
-		if c.Op == "added" {
+	if c.Kind == kindPackage {
+		if c.Op == opAdded {
 			return "sudo pacman -S --needed " + c.Name
 		}
 
 		return "sudo pacman -Rns " + c.Name
 	}
 
-	scope, unit, _ := strings.Cut(c.Name, " ")
-
-	verb := "enable"
-	if c.Op == "removed" {
-		verb = "disable"
-	}
-
-	if scope == "user" {
-		return "systemctl --user " + verb + " " + unit
-	}
-
-	return "sudo systemctl " + verb + " " + unit
+	return unitCommand(c.Name, c.Op != opRemoved)
 }
 
 // ExportTo writes the Markdown to a file, replacing it atomically.
@@ -257,8 +247,8 @@ func (s *Store) ExportTo(path string) error {
 		return err
 	}
 
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		path = real // a linked note stays linked
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved // a linked note stays linked
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

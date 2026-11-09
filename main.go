@@ -77,6 +77,7 @@ func main() {
 	}
 }
 
+//nolint:maintidx // one switch over every subcommand; splitting it is the separate feat/refactor-main branch
 func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		fmt.Fprint(stdout, usage)
@@ -125,7 +126,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "Tracking %s. History lives in %s.\n", s.ConfigDir, s.StateDir)
 
 		return nil
-	case "status":
+	case "status": //nolint:goconst // subcommand name, like every other case here
 		return status(s, stdout, *asJSON)
 	case "note":
 		if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
@@ -294,7 +295,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 			fmt.Fprint(stdout, "\nApply? A checkpoint of the current state is saved first. [y/N] ")
 
 			var answer string
-			fmt.Fscanln(stdin, &answer)
+
+			_, _ = fmt.Fscanln(stdin, &answer)
 
 			if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
 				return errors.New("cancelled")
@@ -315,7 +317,8 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 				return err
 			}
 
-			fmt.Fprintf(stdout, "Backed up to %s. Every change is pushed from now on.\nKeep that repository private: it holds your config files.\n", args[1])
+			fmt.Fprintf(stdout, "Backed up to %s. Every change is pushed from now on.\n", args[1])
+			fmt.Fprintln(stdout, "Keep that repository private: it holds your config files.")
 
 			return nil
 		case len(args) == 1 && args[0] == "off":
@@ -406,11 +409,11 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 
 		return nil
 	case "hook":
-		if len(args) >= 2 && args[0] == "omarchy" {
+		if len(args) >= 2 && args[0] == "omarchy" { //nolint:goconst // subcommand name, not the author or the config directory
 			return s.OmarchyHook(args[1], args[2:])
 		}
 
-		if len(args) == 0 || !slices.Contains([]string{"claude", "codex", "gemini", "grok"}, args[0]) {
+		if len(args) == 0 || !slices.Contains([]string{agentClaude, agentCodex, agentGemini, agentGrok}, args[0]) {
 			return errors.New("usage: syschange hook claude|codex|gemini|grok [start]")
 		}
 
@@ -464,9 +467,9 @@ func suggestAll(s *Store, w io.Writer, agent string, send bool) error {
 func defaultAuthor() string {
 	switch {
 	case os.Getenv("CLAUDECODE") == "1":
-		return "claude"
+		return agentClaude
 	case os.Getenv("GEMINI_CLI") == "1":
-		return "gemini"
+		return agentGemini
 	}
 
 	return ""
@@ -485,6 +488,7 @@ func isTerminal(w io.Writer) bool {
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 
+//nolint:tagliatelle // camelCase keys are the published format the QML side reads
 type statusJSON struct {
 	Initialized bool         `json:"initialized"`
 	Count       int          `json:"count"`
@@ -501,7 +505,10 @@ type statusJSON struct {
 }
 
 func status(s *Store, w io.Writer, asJSON bool) error {
-	out := statusJSON{Initialized: s.Initialized(), ConfigDir: s.ConfigDir, Pending: []Group{}, History: []Entry{}, Agents: []AgentState{}, Checkpoints: []Checkpoint{}, Version: version}
+	out := statusJSON{
+		Initialized: s.Initialized(), ConfigDir: s.ConfigDir, Version: version,
+		Pending: []Group{}, History: []Entry{}, Agents: []AgentState{}, Checkpoints: []Checkpoint{},
+	}
 
 	if g, err := DefaultAgents(); err == nil {
 		if states, err := g.Status(); err == nil {
@@ -583,9 +590,9 @@ func status(s *Store, w io.Writer, asJSON bool) error {
 
 func opSign(op string) string {
 	switch op {
-	case "added":
+	case opAdded:
 		return "+"
-	case "removed":
+	case opRemoved:
 		return "-"
 	}
 
@@ -593,7 +600,7 @@ func opSign(op string) string {
 }
 
 func lineStat(c Change) string {
-	if c.Kind != "config" || (c.Added == 0 && c.Removed == 0) {
+	if c.Kind != kindConfig || (c.Added == 0 && c.Removed == 0) {
 		return ""
 	}
 

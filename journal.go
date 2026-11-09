@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,7 +54,7 @@ func (s *Store) commitEntry(items []string, note, by, undoes string) (Entry, err
 	if err != nil {
 		return Entry{}, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 
 	pending, err := s.Pending()
 	if err != nil {
@@ -72,9 +73,9 @@ func (s *Store) commitEntry(items []string, note, by, undoes string) (Entry, err
 
 	for _, c := range chosen {
 		switch {
-		case c.Kind == "config" && isHome(c.Name):
+		case c.Kind == kindConfig && isHome(c.Name):
 			home = append(home, c.Name)
-		case c.Kind == "config":
+		case c.Kind == kindConfig:
 			paths = append(paths, c.Name)
 		}
 	}
@@ -107,7 +108,7 @@ func (s *Store) commitEntry(items []string, note, by, undoes string) (Entry, err
 		entry.Commit = strings.TrimSpace(string(head))
 	}
 
-	for kind, file := range map[string]string{"package": "packages.txt", "unit": "units.txt"} {
+	for kind, file := range map[string]string{kindPackage: packagesList + ".txt", kindUnit: unitsList + ".txt"} {
 		if err := s.acceptItems(file, kind, chosen); err != nil {
 			return Entry{}, err
 		}
@@ -145,7 +146,7 @@ func (s *Store) acceptItems(file, kind string, chosen []Change) error {
 
 		touched = true
 
-		if c.Op == "added" {
+		if c.Op == opAdded {
 			accepted = append(accepted, c.Name)
 		} else {
 			accepted = slices.DeleteFunc(accepted, func(n string) bool { return n == c.Name })
@@ -179,7 +180,7 @@ func (s *Store) History() ([]Entry, error) {
 		return nil, err
 	}
 
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var entries []Entry
 
@@ -213,7 +214,7 @@ func (s *Store) History() ([]Entry, error) {
 		entries[i].Undone = len(files) > 0 && !slices.ContainsFunc(files, func(f string) bool { return !slices.Contains(back, f) })
 		for _, f := range files {
 			switch {
-			case e.By != "omarchy":
+			case e.By != authorOmarchy:
 				edited[f] = true
 			case edited[f] && !slices.Contains(back, f):
 				entries[i].Touched = append(entries[i].Touched, f)
@@ -254,7 +255,9 @@ func (s *Store) Search(q string) ([]Entry, error) {
 }
 
 func (e Entry) mentions(q string) bool {
-	text := []string{e.Note, e.Title, e.By, e.Commit}
+	text := make([]string, 0, 4+3*len(e.Changes))
+
+	text = append(text, e.Note, e.Title, e.By, e.Commit)
 	for _, c := range e.Changes {
 		text = append(text, c.ID, c.Label, c.By)
 	}
@@ -266,7 +269,7 @@ func (e Entry) configFiles() []string {
 	var files []string
 
 	for _, c := range e.Changes {
-		if c.Kind == "config" {
+		if c.Kind == kindConfig {
 			files = append(files, c.Name)
 		}
 	}
@@ -311,7 +314,7 @@ func (s *Store) Undo(id, by string, only ...string) (Entry, string, error) {
 	var manual []string
 
 	for _, c := range target.Changes {
-		if c.Kind != "config" && len(only) == 0 {
+		if c.Kind != kindConfig && len(only) == 0 {
 			manual = append(manual, undoCommand(c))
 		}
 	}
@@ -440,7 +443,7 @@ func (s *Store) unmerge(commit, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	files := map[string][]byte{"current": current, "after": after, "before": before}
 	for name, body := range files {
@@ -450,7 +453,8 @@ func (s *Store) unmerge(commit, path string) ([]byte, error) {
 	}
 	// Merge "before" into "current" over the common base "after": the entry's
 	// own lines go back to how they were, everything else stays.
-	cmd := exec.Command("git", "merge-file", "-p", "--quiet", filepath.Join(tmp, "current"), filepath.Join(tmp, "after"), filepath.Join(tmp, "before"))
+	cmd := exec.CommandContext(context.Background(),
+		"git", "merge-file", "-p", "--quiet", filepath.Join(tmp, "current"), filepath.Join(tmp, "after"), filepath.Join(tmp, "before"))
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -477,11 +481,11 @@ func (s *Store) Revert(items []string) error {
 
 	for _, c := range chosen {
 		switch {
-		case c.Kind == "config" && c.Op == "added":
+		case c.Kind == kindConfig && c.Op == opAdded:
 			if err := s.removeEntry(c.Name); err != nil {
 				return err
 			}
-		case c.Kind == "config" && isHome(c.Name):
+		case c.Kind == kindConfig && isHome(c.Name):
 			body, err := s.git(nil, "show", "HEAD:"+c.Name)
 			if err != nil {
 				return err
@@ -490,7 +494,7 @@ func (s *Store) Revert(items []string) error {
 			if err := s.writeEntry(c.Name, body, false); err != nil {
 				return err
 			}
-		case c.Kind == "config":
+		case c.Kind == kindConfig:
 			restore = append(restore, c.Name)
 		default:
 			manual = append(manual, undoCommand(c))
@@ -511,22 +515,26 @@ func (s *Store) Revert(items []string) error {
 }
 
 func undoCommand(c Change) string {
-	if c.Kind == "package" {
-		if c.Op == "added" {
+	if c.Kind == kindPackage {
+		if c.Op == opAdded {
 			return "sudo pacman -Rns " + c.Name
 		}
 
 		return "sudo pacman -S " + c.Name
 	}
 
-	scope, unit, _ := strings.Cut(c.Name, " ")
+	return unitCommand(c.Name, c.Op == opRemoved)
+}
+
+func unitCommand(name string, enable bool) string {
+	scope, unit, _ := strings.Cut(name, " ")
 
 	verb := "disable"
-	if c.Op == "removed" {
+	if enable {
 		verb = "enable"
 	}
 
-	if scope == "user" {
+	if scope == scopeUser {
 		return "systemctl --user " + verb + " " + unit
 	}
 
@@ -591,32 +599,35 @@ func (s *Store) Diff(w io.Writer, items []string, color bool) error {
 		var cmd *exec.Cmd
 
 		switch {
-		case c.Kind == "config" && isHome(c.Name):
+		case c.Kind == kindConfig && isHome(c.Name):
 			var old, now []byte
-			if c.Op != "added" {
+			if c.Op != opAdded {
 				if old, err = s.git(nil, "show", "HEAD:"+c.Name); err != nil {
 					return err
 				}
 			}
 
-			if c.Op != "removed" {
+			if c.Op != opRemoved {
 				now, _, _ = s.homeContent(c.Name)
 			}
 
-			w.Write(diffBlobs(c.Name, old, now, colorFlag))
+			if _, err := w.Write(diffBlobs(c.Name, old, now, colorFlag)); err != nil {
+				return err
+			}
 
 			continue
-		case c.Kind != "config":
+		case c.Kind != kindConfig:
 			sign := "+"
-			if c.Op == "removed" {
+			if c.Op == opRemoved {
 				sign = "-"
 			}
 
 			fmt.Fprintf(w, "%s %s %s\n", sign, c.Kind, c.Label)
 
 			continue
-		case c.Op == "added":
-			cmd = exec.Command("git", "diff", "--no-index", "--src-prefix=a/", "--dst-prefix=b/", colorFlag, "--", "/dev/null", c.Name)
+		case c.Op == opAdded:
+			cmd = exec.CommandContext(context.Background(),
+				"git", "diff", "--no-index", "--src-prefix=a/", "--dst-prefix=b/", colorFlag, "--", "/dev/null", c.Name)
 			cmd.Dir = s.ConfigDir
 		default:
 			// Fixed prefixes: the user's diff.mnemonicPrefix or noprefix must not change the output.
@@ -625,7 +636,9 @@ func (s *Store) Diff(w io.Writer, items []string, color bool) error {
 				return err
 			}
 
-			w.Write(out)
+			if _, err := w.Write(out); err != nil {
+				return err
+			}
 
 			continue
 		}
@@ -638,8 +651,10 @@ func (s *Store) Diff(w io.Writer, items []string, color bool) error {
 }
 
 func groupTitles(changes []Change) string {
-	var titles []string
-	for _, g := range Groups(changes) {
+	groups := Groups(changes)
+
+	titles := make([]string, 0, len(groups))
+	for _, g := range groups {
 		titles = append(titles, g.Title)
 	}
 

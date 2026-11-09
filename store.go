@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -69,7 +70,7 @@ func (s *Store) lock(name string) (*os.File, error) {
 	}
 
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 
@@ -94,7 +95,7 @@ func (s *Store) gitEnv(env []string, stdin []byte, args ...string) ([]byte, erro
 		"-c", "core.quotepath=off", "-c", "user.name=syschange", "-c", "user.email=syschange@localhost",
 		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
 	}
-	cmd := exec.Command("git", append(base, args...)...)
+	cmd := exec.CommandContext(context.Background(), "git", slices.Concat(base, args)...)
 
 	cmd.Dir = s.ConfigDir // pathspecs like "." resolve against the working directory
 	if env != nil {
@@ -175,7 +176,7 @@ func (s *Store) Init() error {
 	for _, snap := range []struct {
 		list func() ([]string, error)
 		name string
-	}{{s.ListPackages, "packages"}, {s.ListUnits, "units"}} {
+	}{{s.ListPackages, packagesList}, {s.ListUnits, unitsList}} {
 		items, err := snap.list()
 		if err != nil {
 			return err
@@ -258,7 +259,8 @@ func looksSecret(body []byte) bool {
 // secretLike matches a password, token or key: an assignment to a secret-sounding
 // name, or a value that has the shape of a known credential wherever it is.
 var secretLike = regexp.MustCompile(`(?i)` +
-	`[\w.-]*(password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key|credential|auth|bearer)[\w.-]*["']?\s*[:=]\s*["']?(bearer\s+)?[^"'\s,}{]{6,}` +
+	`[\w.-]*(password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key|credential|auth|bearer)[\w.-]*` +
+	`["']?\s*[:=]\s*["']?(bearer\s+)?[^"'\s,}{]{6,}` +
 	`|\b(ghp|gho|ghu|ghs|ghr)_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}|glpat-[a-z0-9_-]{20,}|xox[abpr]-[a-z0-9-]{10,}` +
 	`|\bsk-[a-z0-9_-]{20,}|\bAKIA[0-9A-Z]{16}\b|\bAIza[0-9a-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----` +
 	`|[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@`)
@@ -269,15 +271,15 @@ func writeAtomic(path string, data []byte, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 
 	if err := f.Chmod(perm); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 
@@ -322,7 +324,7 @@ func (s *Store) writeEntry(path string, body []byte, link bool) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	perm := os.FileMode(0o755)
 	if dir == s.HomeDir {
@@ -364,7 +366,7 @@ func (s *Store) removeEntry(path string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -476,7 +478,7 @@ func readLines(path string) ([]string, error) {
 		return nil, err
 	}
 
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var lines []string
 
@@ -533,7 +535,7 @@ func nulJoin(items []string) []byte {
 
 // pacmanExplicit lists explicitly installed packages, AUR ones included.
 func pacmanExplicit() ([]string, error) {
-	out, err := exec.Command("pacman", "-Qqe").Output()
+	out, err := exec.CommandContext(context.Background(), "pacman", "-Qqe").Output()
 	if err != nil {
 		return nil, fmt.Errorf("pacman -Qqe: %w", err)
 	}
@@ -545,13 +547,13 @@ func pacmanExplicit() ([]string, error) {
 func enabledUnits() ([]string, error) {
 	var units []string
 
-	for _, scope := range []string{"system", "user"} {
+	for _, scope := range []string{scopeSystem, scopeUser} {
 		args := []string{"list-unit-files", "--state=enabled", "--no-legend", "--no-pager"}
-		if scope == "user" {
+		if scope == scopeUser {
 			args = append([]string{"--user"}, args...)
 		}
 
-		out, err := exec.Command("systemctl", args...).Output()
+		out, err := exec.CommandContext(context.Background(), "systemctl", args...).Output()
 		if err != nil {
 			return nil, fmt.Errorf("systemctl %s: %w", strings.Join(args, " "), err)
 		}

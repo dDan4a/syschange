@@ -44,15 +44,15 @@ func (s *Store) Checkpoint(name string) (Checkpoint, error) {
 
 	for _, c := range pending {
 		switch {
-		case c.Kind == "config" && isHome(c.Name):
+		case c.Kind == kindConfig && isHome(c.Name):
 			home = append(home, c.Name)
-		case c.Kind == "config":
+		case c.Kind == kindConfig:
 			paths = append(paths, c.Name)
 		}
 	}
 	// A private index: the real one stays equal to HEAD, which status relies on.
 	index := s.path("checkpoint.index")
-	defer os.Remove(index)
+	defer func() { _ = os.Remove(index) }()
 
 	env := []string{"GIT_INDEX_FILE=" + index}
 	if _, err := s.gitEnv(env, nil, "read-tree", "HEAD"); err != nil {
@@ -118,7 +118,7 @@ func (s *Store) Checkpoints() ([]Checkpoint, error) {
 		return nil, err
 	}
 
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var out []Checkpoint
 
@@ -159,7 +159,8 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	if risky, err := s.unsaved(); err != nil {
 		return "", err
 	} else if len(risky) > 0 {
-		return "", fmt.Errorf("these files have changes a checkpoint cannot keep (secrets, binary or large files), so a restore would lose them: %s. Revert them or stop tracking them first", strings.Join(risky, ", "))
+		return "", fmt.Errorf("these files have changes a checkpoint cannot keep (secrets, binary or large files), "+
+			"so a restore would lose them: %s. Revert them or stop tracking them first", strings.Join(risky, ", "))
 	}
 
 	before, err := s.Checkpoint("Before restoring " + target.Name)
@@ -206,7 +207,8 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	}
 
 	if len(restore) > 0 {
-		if _, err := s.git(nulJoin(restore), "restore", "--source="+target.Commit, "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+		args := []string{"restore", "--source=" + target.Commit, "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"}
+		if _, err := s.git(nulJoin(restore), args...); err != nil {
 			return "", err
 		}
 	}
@@ -251,7 +253,7 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	var ids []string
 
 	for _, c := range pending {
-		if c.Kind == "config" {
+		if c.Kind == kindConfig {
 			ids = append(ids, c.ID)
 		}
 	}
@@ -274,7 +276,7 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 
 	var manual []string
 	// setChanges(now→checkpoint) lists what to install or enable to get back.
-	for _, c := range append(setChanges("package", nowPkgs, target.Packages), setChanges("unit", nowUnits, target.Units)...) {
+	for _, c := range append(setChanges(kindPackage, nowPkgs, target.Packages), setChanges(kindUnit, nowUnits, target.Units)...) {
 		manual = append(manual, redo(c))
 	}
 

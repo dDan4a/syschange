@@ -21,6 +21,7 @@ type window struct {
 	End     time.Time `json:"end"`
 }
 
+//nolint:tagliatelle // field names are set by the agents, Grok sends camelCase
 type toolInput struct {
 	hookInput
 
@@ -37,7 +38,7 @@ func (s *Store) callFile(agent string, in toolInput) string {
 func (s *Store) ToolHook(agent string, start bool, stdin io.Reader) error {
 	var in toolInput
 	if json.NewDecoder(stdin).Decode(&in) != nil || in.session() == "" || !s.Initialized() || suggesting() {
-		return nil // fail open: bad input never breaks the agent
+		return nil //nolint:nilerr // fail open: bad input never breaks the agent
 	}
 
 	if err := os.MkdirAll(s.path("sessions"), 0o700); err != nil {
@@ -51,14 +52,14 @@ func (s *Store) ToolHook(agent string, start bool, stdin io.Reader) error {
 
 	b, err := os.ReadFile(file)
 	if err != nil {
-		return nil // no matching start: nothing to record
+		return nil //nolint:nilerr // no matching start: nothing to record
 	}
 
-	os.Remove(file)
+	_ = os.Remove(file)
 
 	began, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(b)))
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // fail open: a torn start file never breaks the agent
 	}
 
 	line, err := json.Marshal(window{Agent: agent, Session: in.session(), Start: began, End: time.Now().UTC()})
@@ -82,12 +83,13 @@ func (s *Store) pruneWindows() {
 
 	for _, w := range s.windows() {
 		if time.Since(w.End) < 30*24*time.Hour {
-			b, _ := json.Marshal(w)
-			keep = append(keep, string(b))
+			if b, err := json.Marshal(w); err == nil {
+				keep = append(keep, string(b))
+			}
 		}
 	}
 
-	os.WriteFile(path, []byte(strings.Join(keep, "\n")+"\n"), 0o600)
+	_ = writeAtomic(path, []byte(strings.Join(keep, "\n")+"\n"), 0o600)
 }
 
 func (s *Store) windows() []window {
@@ -95,7 +97,7 @@ func (s *Store) windows() []window {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var out []window
 
@@ -138,14 +140,14 @@ func (s *Store) Attribute(changes []Change) {
 // a package's install time. Removals carry no time.
 func changeTime(s *Store, c Change) (time.Time, bool) {
 	switch {
-	case c.Kind == "config" && c.Op != "removed":
+	case c.Kind == kindConfig && c.Op != opRemoved:
 		info, err := os.Lstat(s.realPath(c.Name))
 		if err != nil {
 			return time.Time{}, false
 		}
 
 		return info.ModTime(), true
-	case c.Kind == "package" && c.Op == "added":
+	case c.Kind == kindPackage && c.Op == opAdded:
 		return packageInstallTime(c.Name)
 	}
 

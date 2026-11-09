@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -30,27 +31,37 @@ type agent struct {
 	TimeoutMS bool // hook timeout is in milliseconds, not seconds
 }
 
+const (
+	agentClaude = "claude"
+	agentCodex  = "codex"
+	agentGemini = "gemini"
+	agentGrok   = "grok"
+)
+
+//nolint:goconst // hook event names are per-agent data that happen to match
 func agents(home string) []agent {
 	return []agent{
 		{
-			Name: "claude", Home: filepath.Join(home, ".claude"),
+			Name: agentClaude, Home: filepath.Join(home, ".claude"),
 			SkillDirs: []string{filepath.Join(home, ".claude", "skills")},
 			HookFile:  filepath.Join(home, ".claude", "settings.json"), StopEvent: "Stop", PreEvent: "PreToolUse", PostEvent: "PostToolUse",
 		},
 		{
-			Name: "codex", Home: filepath.Join(home, ".codex"),
+			Name: agentCodex, Home: filepath.Join(home, ".codex"),
 			SkillDirs: []string{filepath.Join(home, ".codex", "skills")},
 			HookFile:  filepath.Join(home, ".codex", "hooks.json"), StopEvent: "Stop", PreEvent: "PreToolUse", PostEvent: "PostToolUse",
 		},
 		{
-			Name: "gemini", Home: filepath.Join(home, ".gemini"),
+			Name: agentGemini, Home: filepath.Join(home, ".gemini"),
 			SkillDirs: []string{filepath.Join(home, ".gemini", "skills")},
-			HookFile:  filepath.Join(home, ".gemini", "settings.json"), StopEvent: "AfterAgent", PreEvent: "BeforeTool", PostEvent: "AfterTool", TimeoutMS: true,
+			HookFile:  filepath.Join(home, ".gemini", "settings.json"),
+			StopEvent: "AfterAgent", PreEvent: "BeforeTool", PostEvent: "AfterTool", TimeoutMS: true,
 		},
 		{
-			Name: "grok", Home: filepath.Join(home, ".grok"),
+			Name: agentGrok, Home: filepath.Join(home, ".grok"),
 			SkillDirs: []string{filepath.Join(home, ".grok", "skills")},
-			HookFile:  filepath.Join(home, ".grok", "hooks", "syschange.json"), OwnFile: true, StopEvent: "Stop", PreEvent: "PreToolUse", PostEvent: "PostToolUse",
+			HookFile:  filepath.Join(home, ".grok", "hooks", "syschange.json"), OwnFile: true,
+			StopEvent: "Stop", PreEvent: "PreToolUse", PostEvent: "PostToolUse",
 		},
 	}
 }
@@ -88,7 +99,7 @@ type AgentState struct {
 	Default   bool   `json:"default"` // Omarchy's default agent
 }
 
-var agentTitles = map[string]string{"claude": "Claude Code", "codex": "Codex", "gemini": "Gemini CLI", "grok": "Grok"}
+var agentTitles = map[string]string{agentClaude: "Claude Code", agentCodex: "Codex", agentGemini: "Gemini CLI", agentGrok: "Grok"}
 
 type Agents struct {
 	Home    string // user's home
@@ -255,7 +266,7 @@ func (g *Agents) Remove() error {
 		}
 
 		for _, ev := range a.events() {
-			if err := jqEdit(a.HookFile, `if .hooks[$ev] then .hooks[$ev] |= (map(.hooks |= map(select((.command // "") | test($m) | not))) | map(select(.hooks | length > 0))) | if .hooks[$ev] == [] then del(.hooks[$ev]) else . end else . end`,
+			if err := jqEdit(a.HookFile, removeHookFilter,
 				"--arg", "m", hookMarker, "--arg", "ev", ev); err != nil {
 				return err
 			}
@@ -281,14 +292,17 @@ func (g *Agents) unlinkSkill(dir string) error {
 }
 
 // hookMarker finds our hook in a file whatever path the binary had.
+const removeHookFilter = `if .hooks[$ev] then .hooks[$ev] |= (map(.hooks |= map(select((.command // "") | test($m) | not))) | ` +
+	`map(select(.hooks | length > 0))) | if .hooks[$ev] == [] then del(.hooks[$ev]) else . end else . end`
+
 const hookMarker = `syschange[^ /]*'? hook (claude|codex|gemini|grok)( start| pre| post)?( \|\| true)?$`
 
 func hasHook(file, event string) (bool, error) {
 	if _, err := os.Stat(file); err != nil {
-		return false, nil
+		return false, nil //nolint:nilerr // a hook file that cannot be read has no hook of ours
 	}
 
-	out, err := exec.Command("jq", "--arg", "m", hookMarker, "--arg", "ev", event,
+	out, err := exec.CommandContext(context.Background(), "jq", "--arg", "m", hookMarker, "--arg", "ev", event,
 		`[.hooks[$ev][]?.hooks[]?.command // "" | select(test($m))] | length > 0`, file).Output()
 	if err != nil {
 		return false, fmt.Errorf("jq %s: %w", file, err)
@@ -363,8 +377,8 @@ func backupOnce(file string, done map[string]bool) error {
 // jqEdit rewrites a JSON file with jq, which keeps the user's key order. A
 // symlinked config (dotfiles) is edited at its target, keeping the link.
 func jqEdit(file, filter string, args ...string) error {
-	if real, err := filepath.EvalSymlinks(file); err == nil {
-		file = real
+	if resolved, err := filepath.EvalSymlinks(file); err == nil {
+		file = resolved
 	}
 
 	orig, err := os.ReadFile(file)
@@ -372,7 +386,7 @@ func jqEdit(file, filter string, args ...string) error {
 		return err
 	}
 
-	cmd := exec.Command("jq", append(append(args, filter), file)...)
+	cmd := exec.CommandContext(context.Background(), "jq", append(append(args, filter), file)...)
 
 	out, err := cmd.Output()
 	if err != nil {

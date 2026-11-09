@@ -104,7 +104,7 @@ func (s *Store) SuggestAll(agent string, w io.Writer) (described, total int, err
 func pickAgent(agent string) string {
 	if agent == "" {
 		if agent = omarchyDefaultAgent(); agent == "" {
-			agent = "claude"
+			agent = agentClaude
 		}
 	}
 
@@ -148,30 +148,33 @@ func runAgent(ctx context.Context, agent, prompt string) (string, error) {
 	stdin := prompt
 
 	switch agent {
-	case "claude":
+	case agentClaude:
 		args = []string{"claude", "-p", "--model", "haiku", "--tools", "", "--no-session-persistence"}
-	case "codex":
+	case agentCodex:
 		f, err := os.CreateTemp("", "syschange-suggest-")
 		if err != nil {
 			return "", err
 		}
 
-		f.Close()
-		defer os.Remove(f.Name())
+		_ = f.Close()
+		defer func() { _ = os.Remove(f.Name()) }()
 
 		outFile = f.Name()
 		args = []string{"codex", "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-o", outFile, "-"}
-	case "gemini":
+	case agentGemini:
 		args = []string{"gemini", "-p", "Follow the instructions given on stdin."} // Gemini appends stdin to -p
-	case "grok":
+	case agentGrok:
 		f, err := os.CreateTemp("", "syschange-prompt-")
 		if err != nil {
 			return "", err
 		}
-		defer os.Remove(f.Name())
+		defer func() { _ = os.Remove(f.Name()) }()
 
-		f.WriteString(prompt)
-		f.Close()
+		_, werr := f.WriteString(prompt)
+		if err := errors.Join(werr, f.Close()); err != nil {
+			return "", err
+		}
+
 		args = []string{"grok", "--prompt-file", f.Name(), "--max-turns", "1"}
 		stdin = ""
 	default:
@@ -218,7 +221,7 @@ func lazyInstaller(path string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	head := make([]byte, 1024)
 	n, _ := f.Read(head)

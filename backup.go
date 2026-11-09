@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,10 +18,15 @@ import (
 // checkpoints), plus the checkpoint refs. Secrets never reach it: they are
 // never in the history in the first place.
 
-const backupRemote = "backup"
+const (
+	backupRemote       = "backup"
+	backupConfigBranch = "config"
+)
 
 // stateFiles are copied into the "state" branch when they exist.
-var stateFiles = []string{"journal.jsonl", "packages.txt", "packages.init.txt", "packages.aur.txt", "units.txt", "units.init.txt", "checkpoints.jsonl", "tracked.txt"}
+var stateFiles = []string{
+	"journal.jsonl", "packages.txt", "packages.init.txt", "packages.aur.txt", "units.txt", "units.init.txt", "checkpoints.jsonl", "tracked.txt",
+}
 
 type PushStatus struct {
 	Remote string    `json:"remote"`
@@ -50,7 +56,10 @@ func (s *Store) SetRemote(url string) error {
 	}
 
 	if url == "" {
-		os.Remove(s.path("push.json"))
+		if err := os.Remove(s.path("push.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+
 		return nil
 	}
 
@@ -72,14 +81,14 @@ func (s *Store) Push() error {
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 
 	err = s.commitState()
 	if err == nil {
 		// Never ask for a password: this runs in the background.
 		env := []string{"GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND=ssh -oBatchMode=yes"}
 		_, err = s.gitEnv(env, nil, "push", "--quiet", backupRemote,
-			"HEAD:refs/heads/config", "refs/heads/state:refs/heads/state", "refs/checkpoints/*:refs/checkpoints/*")
+			"HEAD:refs/heads/"+backupConfigBranch, "refs/heads/state:refs/heads/state", "refs/checkpoints/*:refs/checkpoints/*")
 	}
 
 	st := PushStatus{Remote: url, Time: time.Now()}
@@ -87,8 +96,12 @@ func (s *Store) Push() error {
 		st.Error = err.Error()
 	}
 
-	b, _ := json.Marshal(st)
-	if werr := os.WriteFile(s.path("push.json"), b, 0o600); werr != nil && err == nil {
+	b, werr := json.Marshal(st)
+	if werr == nil {
+		werr = os.WriteFile(s.path("push.json"), b, 0o600)
+	}
+
+	if werr != nil && err == nil {
 		err = werr
 	}
 
@@ -174,10 +187,10 @@ func spawnPush() {
 		return
 	}
 
-	cmd := exec.Command(exe, "push", "--quiet")
+	cmd := exec.CommandContext(context.Background(), exe, "push", "--quiet")
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if cmd.Start() == nil {
-		go cmd.Wait()
+		go func() { _ = cmd.Wait() }()
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -88,9 +89,9 @@ func (s *Store) homeAllowed(rel string) error {
 		if err != nil {
 			return err
 		}
-		defer os.RemoveAll(tmp)
+		defer func() { _ = os.RemoveAll(tmp) }()
 
-		if err := exec.Command("git", "init", "--bare", "--quiet", tmp).Run(); err != nil {
+		if err := exec.CommandContext(context.Background(), "git", "init", "--bare", "--quiet", tmp).Run(); err != nil {
 			return err
 		}
 
@@ -101,11 +102,12 @@ func (s *Store) homeAllowed(rel string) error {
 		gitDir = tmp
 	}
 
-	cmd := exec.Command("git", "--git-dir="+gitDir, "--work-tree="+s.ConfigDir, "check-ignore", "-q", "--no-index", "--", rel)
+	cmd := exec.CommandContext(context.Background(),
+		"git", "--git-dir="+gitDir, "--work-tree="+s.ConfigDir, "check-ignore", "-q", "--no-index", "--", rel)
 	cmd.Dir = s.ConfigDir
 
-	var exit *exec.ExitError
-	if err := cmd.Run(); !errors.As(err, &exit) || exit.ExitCode() != 1 {
+	err := cmd.Run()
+	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
 		return fmt.Errorf("~/%s matches an exclude pattern (see syschange ignore)", rel)
 	}
 
@@ -120,7 +122,7 @@ func (s *Store) readHome(rel string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, syscall.ELOOP) {
@@ -131,7 +133,7 @@ func (s *Store) readHome(rel string) ([]byte, error) {
 		return nil, err
 	}
 
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("~/%s is not a regular file", rel)
@@ -288,10 +290,8 @@ func (s *Store) stageHome(env []string, names []string) error {
 }
 
 func (s *Store) updateIndex(env []string, blobs [][2]string, gone []string) error {
-	var (
-		info  []string
-		added []string
-	)
+	info := make([]string, 0, len(blobs)+len(gone))
+	added := make([]string, 0, len(blobs))
 
 	for _, b := range blobs {
 		info = append(info, "100644 "+b[1]+"\t"+b[0])
@@ -362,17 +362,17 @@ func (s *Store) homeChanges() ([]Change, error) {
 			label = inner
 		}
 
-		c := Change{ID: name, Kind: "config", Name: name, Label: label}
+		c := Change{ID: name, Kind: kindConfig, Name: name, Label: label}
 
 		switch {
 		case inHead && !exists:
-			c.Op = "removed"
+			c.Op = opRemoved
 		case !ok:
 			continue
 		case !inHead:
-			c.Op = "added"
+			c.Op = opAdded
 		case string(old) != string(body):
-			c.Op = "modified"
+			c.Op = opModified
 		default:
 			continue
 		}
@@ -389,7 +389,7 @@ func (s *Store) homeChanges() ([]Change, error) {
 }
 
 func numstat(out []byte) (added, removed int) {
-	fmt.Sscanf(string(out), "%d\t%d", &added, &removed)
+	_, _ = fmt.Sscanf(string(out), "%d\t%d", &added, &removed)
 	return added, removed
 }
 
@@ -400,7 +400,7 @@ func diffBlobs(name string, old, now []byte, args ...string) []byte {
 	if err != nil {
 		return nil
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	sides := []string{"/dev/null", "/dev/null"}
 
@@ -418,7 +418,8 @@ func diffBlobs(name string, old, now []byte, args ...string) []byte {
 		sides[i] = side
 	}
 
-	cmd := exec.Command("git", append(append([]string{"diff", "--no-index", "--no-prefix"}, args...), "--", sides[0], sides[1])...)
+	gitArgs := slices.Concat([]string{"diff", "--no-index", "--no-prefix"}, args, []string{"--", sides[0], sides[1]})
+	cmd := exec.CommandContext(context.Background(), "git", gitArgs...)
 	cmd.Dir = tmp
 	out, _ := cmd.Output() // exit status 1 just means "files differ"
 

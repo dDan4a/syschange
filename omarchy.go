@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +16,8 @@ import (
 // Omarchy's own actions (updates, theme and font switches) rewrite many config
 // files at once. Hooks record them as one entry by "omarchy" instead of
 // flooding the bar with changes the user did not make.
+
+const authorOmarchy = "omarchy"
 
 var omarchyEvents = map[string]string{ // hook name -> the command that fires it
 	"post-update": "omarchy-update",
@@ -29,7 +33,7 @@ func (s *Store) omarchyHookPath(event string) string {
 // the files it created, relative to ConfigDir; none when Omarchy is absent.
 func (s *Store) installOmarchyHooks(exe string) ([]string, error) {
 	if _, err := os.Stat(filepath.Join(s.ConfigDir, "omarchy", "hooks")); err != nil {
-		return nil, nil
+		return nil, nil //nolint:nilerr // no hook directory: Omarchy is absent, nothing to install
 	}
 
 	var created []string
@@ -88,7 +92,7 @@ func (s *Store) OmarchyHook(event string, args []string) error {
 		return nil
 	}
 
-	_, err = s.Record(ids, omarchyNote(event, args), "omarchy")
+	_, err = s.Record(ids, omarchyNote(event, args), authorOmarchy)
 
 	return err
 }
@@ -103,7 +107,7 @@ func omarchyNote(event string, args []string) string {
 		return "Font: " + arg
 	}
 
-	if out, err := exec.Command("omarchy", "version").Output(); err == nil {
+	if out, err := exec.CommandContext(context.Background(), "omarchy", "version").Output(); err == nil {
 		return "Omarchy update to " + strings.TrimSpace(string(out))
 	}
 
@@ -149,7 +153,7 @@ func parentPID(pid int) (int, error) {
 		return 0, err
 	}
 	// The command name may contain spaces and parentheses: fields start after the last ')'.
-	i := strings.LastIndexByte(string(stat), ')')
+	i := bytes.LastIndexByte(stat, ')')
 
 	fields := strings.Fields(string(stat)[i+1:])
 	if len(fields) < 2 {
@@ -160,7 +164,7 @@ func parentPID(pid int) (int, error) {
 }
 
 func processStart(pid int) (time.Time, error) {
-	out, err := exec.Command("ps", "-o", "etimes=", "-p", strconv.Itoa(pid)).Output()
+	out, err := exec.CommandContext(context.Background(), "ps", "-o", "etimes=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return time.Time{}, err
 	}

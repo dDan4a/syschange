@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -20,8 +21,10 @@ type window struct {
 	End     time.Time `json:"end"`
 }
 
+//nolint:tagliatelle // field names are set by the agents, Grok sends camelCase
 type toolInput struct {
 	hookInput
+
 	ToolUseID      string `json:"tool_use_id"`
 	ToolUseIDCamel string `json:"toolUseId"`
 }
@@ -35,29 +38,37 @@ func (s *Store) callFile(agent string, in toolInput) string {
 func (s *Store) ToolHook(agent string, start bool, stdin io.Reader) error {
 	var in toolInput
 	if json.NewDecoder(stdin).Decode(&in) != nil || in.session() == "" || !s.Initialized() || suggesting() {
-		return nil // fail open: bad input never breaks the agent
+		return nil //nolint:nilerr // fail open: bad input never breaks the agent
 	}
+
 	if err := os.MkdirAll(s.path("sessions"), 0o700); err != nil {
 		return err
 	}
+
 	file := s.callFile(agent, in)
 	if start {
 		return os.WriteFile(file, []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0o600)
 	}
+
 	b, err := os.ReadFile(file)
 	if err != nil {
-		return nil // no matching start: nothing to record
+		return nil //nolint:nilerr // no matching start: nothing to record
 	}
-	os.Remove(file)
+
+	_ = os.Remove(file)
+
 	began, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(b)))
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // fail open: a torn start file never breaks the agent
 	}
+
 	line, err := json.Marshal(window{Agent: agent, Session: in.session(), Start: began, End: time.Now().UTC()})
 	if err != nil {
 		return err
 	}
+
 	s.pruneWindows()
+
 	return appendLines(s.path("agent-windows.jsonl"), []string{string(line)})
 }
 
@@ -67,14 +78,18 @@ func (s *Store) pruneWindows() {
 	if info, err := os.Stat(path); err != nil || info.Size() < 512<<10 {
 		return
 	}
+
 	var keep []string
+
 	for _, w := range s.windows() {
 		if time.Since(w.End) < 30*24*time.Hour {
-			b, _ := json.Marshal(w)
-			keep = append(keep, string(b))
+			if b, err := json.Marshal(w); err == nil {
+				keep = append(keep, string(b))
+			}
 		}
 	}
-	os.WriteFile(path, []byte(strings.Join(keep, "\n")+"\n"), 0o600)
+
+	_ = writeAtomic(path, []byte(strings.Join(keep, "\n")+"\n"), 0o600)
 }
 
 func (s *Store) windows() []window {
@@ -82,8 +97,10 @@ func (s *Store) windows() []window {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
+
 	var out []window
+
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		var w window
@@ -91,6 +108,7 @@ func (s *Store) windows() []window {
 			out = append(out, w)
 		}
 	}
+
 	return out
 }
 
@@ -100,17 +118,18 @@ func (s *Store) Attribute(changes []Change) {
 	if len(ws) == 0 {
 		return
 	}
+
 	for i := range changes {
 		t, ok := changeTime(s, changes[i])
 		if !ok {
 			continue
 		}
 		// File times come from a coarse clock and pacman stores whole seconds.
-		for j := len(ws) - 1; j >= 0; j-- {
-			w := ws[j]
+		for _, w := range slices.Backward(ws) {
 			if !t.Before(w.Start.Add(-time.Second)) && !t.After(w.End.Add(time.Second)) {
 				changes[i].By = w.Agent
 				changes[i].Session = w.Session
+
 				break
 			}
 		}
@@ -121,14 +140,16 @@ func (s *Store) Attribute(changes []Change) {
 // a package's install time. Removals carry no time.
 func changeTime(s *Store, c Change) (time.Time, bool) {
 	switch {
-	case c.Kind == "config" && c.Op != "removed":
+	case c.Kind == kindConfig && c.Op != opRemoved:
 		info, err := os.Lstat(s.realPath(c.Name))
 		if err != nil {
 			return time.Time{}, false
 		}
+
 		return info.ModTime(), true
-	case c.Kind == "package" && c.Op == "added":
+	case c.Kind == kindPackage && c.Op == opAdded:
 		return packageInstallTime(c.Name)
 	}
+
 	return time.Time{}, false
 }

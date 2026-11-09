@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -36,17 +37,21 @@ func (s *Store) homeName(p string) (string, error) {
 	if s.HomeDir == "" {
 		return "", errors.New("no home directory")
 	}
+
 	if rel, ok := strings.CutPrefix(p, homePrefix); ok {
 		return homePrefix + filepath.ToSlash(filepath.Clean(rel)), nil
 	}
+
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		return "", err
 	}
+
 	rel, err := filepath.Rel(s.HomeDir, abs)
 	if err != nil || !filepath.IsLocal(rel) {
 		return "", fmt.Errorf("%s is not inside %s", p, s.HomeDir)
 	}
+
 	return homePrefix + filepath.ToSlash(rel), nil
 }
 
@@ -57,15 +62,18 @@ func (s *Store) homeAllowed(rel string) error {
 	if s.HomeDir == "" {
 		return errors.New("no home directory")
 	}
+
 	if !safePath(rel) || rel == "." {
 		return fmt.Errorf("refusing unsafe path %q", rel)
 	}
+
 	abs := filepath.Join(s.HomeDir, rel)
 	for _, dir := range []string{s.ConfigDir, s.StateDir} {
 		if r, err := filepath.Rel(dir, abs); err == nil && filepath.IsLocal(r) || abs == dir {
 			return fmt.Errorf("~/%s is inside %s, which syschange manages itself", rel, dir)
 		}
 	}
+
 	for _, d := range noHome {
 		if rel == d || strings.HasPrefix(rel, d+"/") || strings.HasSuffix(rel, "_history") {
 			return fmt.Errorf("~/%s may hold keys or passwords: syschange never tracks it", rel)
@@ -81,21 +89,28 @@ func (s *Store) homeAllowed(rel string) error {
 		if err != nil {
 			return err
 		}
-		defer os.RemoveAll(tmp)
-		if err := exec.Command("git", "init", "--bare", "--quiet", tmp).Run(); err != nil {
+		defer func() { _ = os.RemoveAll(tmp) }()
+
+		if err := exec.CommandContext(context.Background(), "git", "init", "--bare", "--quiet", tmp).Run(); err != nil {
 			return err
 		}
+
 		if err := os.WriteFile(filepath.Join(tmp, "info", "exclude"), []byte(defaultExcludes), 0o600); err != nil {
 			return err
 		}
+
 		gitDir = tmp
 	}
-	cmd := exec.Command("git", "--git-dir="+gitDir, "--work-tree="+s.ConfigDir, "check-ignore", "-q", "--no-index", "--", rel)
+
+	cmd := exec.CommandContext(context.Background(),
+		"git", "--git-dir="+gitDir, "--work-tree="+s.ConfigDir, "check-ignore", "-q", "--no-index", "--", rel)
 	cmd.Dir = s.ConfigDir
-	var exit *exec.ExitError
-	if err := cmd.Run(); !errors.As(err, &exit) || exit.ExitCode() != 1 {
+
+	err := cmd.Run()
+	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
 		return fmt.Errorf("~/%s matches an exclude pattern (see syschange ignore)", rel)
 	}
+
 	return nil
 }
 
@@ -107,22 +122,28 @@ func (s *Store) readHome(rel string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
+
 	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, syscall.ELOOP) {
 		return nil, fmt.Errorf("~/%s is a symlink", rel)
 	}
+
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+
+	defer func() { _ = f.Close() }()
+
 	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("~/%s is not a regular file", rel)
 	}
+
 	body, err := io.ReadAll(io.LimitReader(f, maxFileSize+1))
 	if err == nil && len(body) > maxFileSize {
 		return nil, fmt.Errorf("~/%s is larger than %d KB", rel, maxFileSize>>10)
 	}
+
 	return body, err
 }
 
@@ -130,10 +151,12 @@ func (s *Store) readHome(rel string) ([]byte, error) {
 // exists is false only when the file is gone.
 func (s *Store) homeContent(name string) (body []byte, ok, exists bool) {
 	rel := strings.TrimPrefix(name, homePrefix)
+
 	body, err := s.readHome(rel)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, false, false
 	}
+
 	return body, err == nil && s.homeAllowed(rel) == nil && plainText(body), true
 }
 
@@ -143,41 +166,52 @@ func (s *Store) Track(paths []string) error {
 	if !s.Initialized() {
 		return ErrNotInitialized
 	}
+
 	names, err := s.trackedFiles()
 	if err != nil {
 		return err
 	}
+
 	var add []string
+
 	for _, p := range paths {
 		name, err := s.homeName(p)
 		if err != nil {
 			return err
 		}
+
 		rel := strings.TrimPrefix(name, homePrefix)
 		if err := s.homeAllowed(rel); err != nil {
 			return err
 		}
+
 		body, err := s.readHome(rel)
 		if err != nil {
 			return err
 		}
+
 		if !plainText(body) {
 			return fmt.Errorf("%s looks like it holds a secret or binary data: not tracking it", name)
 		}
+
 		if !slices.Contains(names, name) {
 			names = append(names, name)
 			add = append(add, name)
 		}
 	}
+
 	if len(add) == 0 {
 		return nil
 	}
+
 	if err := writeLines(s.trackedFile(), names); err != nil {
 		return err
 	}
+
 	if err := s.stageHome(nil, add); err != nil {
 		return err
 	}
+
 	return s.commitStaged("track " + strings.Join(add, " "))
 }
 
@@ -186,28 +220,36 @@ func (s *Store) Untrack(paths []string) error {
 	if !s.Initialized() {
 		return ErrNotInitialized
 	}
+
 	names, err := s.trackedFiles()
 	if err != nil {
 		return err
 	}
+
 	var drop []string
+
 	for _, p := range paths {
 		name, err := s.homeName(p)
 		if err != nil {
 			return err
 		}
+
 		if !slices.Contains(names, name) {
 			return fmt.Errorf("%s is not tracked", name)
 		}
+
 		drop = append(drop, name)
 	}
+
 	names = slices.DeleteFunc(names, func(n string) bool { return slices.Contains(drop, n) })
 	if err := writeLines(s.trackedFile(), names); err != nil {
 		return err
 	}
+
 	if err := s.updateIndex(nil, nil, drop); err != nil {
 		return err
 	}
+
 	return s.commitStaged("untrack " + strings.Join(drop, " "))
 }
 
@@ -216,7 +258,9 @@ func (s *Store) commitStaged(msg string) error {
 	if err != nil || len(staged) == 0 {
 		return err
 	}
+
 	_, err = s.git(nil, "commit", "--quiet", "-m", msg)
+
 	return err
 }
 
@@ -224,7 +268,9 @@ func (s *Store) commitStaged(msg string) error {
 // private one): gone files leave it, files it may not keep are left as they were.
 func (s *Store) stageHome(env []string, names []string) error {
 	var blobs [][2]string // name, sha
+
 	var gone []string
+
 	for _, name := range names {
 		body, ok, exists := s.homeContent(name)
 		switch {
@@ -235,32 +281,41 @@ func (s *Store) stageHome(env []string, names []string) error {
 			if err != nil {
 				return err
 			}
+
 			blobs = append(blobs, [2]string{name, strings.TrimSpace(string(sha))})
 		}
 	}
+
 	return s.updateIndex(env, blobs, gone)
 }
 
 func (s *Store) updateIndex(env []string, blobs [][2]string, gone []string) error {
-	var info []string
-	var added []string
+	info := make([]string, 0, len(blobs)+len(gone))
+	added := make([]string, 0, len(blobs))
+
 	for _, b := range blobs {
 		info = append(info, "100644 "+b[1]+"\t"+b[0])
 		added = append(added, b[0])
 	}
+
 	for _, name := range gone {
 		info = append(info, "0 0000000000000000000000000000000000000000\t"+name)
 	}
+
 	if len(info) == 0 {
 		return nil
 	}
+
 	if _, err := s.gitEnv(env, nulJoin(info), "update-index", "-z", "--index-info"); err != nil {
 		return err
 	}
+
 	if len(added) == 0 {
 		return nil
 	}
+
 	_, err := s.gitEnv(env, nulJoin(added), "update-index", "-z", "--skip-worktree", "--stdin")
+
 	return err
 }
 
@@ -270,14 +325,18 @@ func (s *Store) recorded(rev string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	files := map[string][]byte{}
+
 	for _, name := range splitNul(out) {
 		body, err := s.git(nil, "show", rev+":"+name)
 		if err != nil {
 			return nil, err
 		}
+
 		files[name] = body
 	}
+
 	return files, nil
 }
 
@@ -286,11 +345,14 @@ func (s *Store) homeChanges() ([]Change, error) {
 	if err != nil || len(names) == 0 {
 		return nil, err
 	}
+
 	head, err := s.recorded("HEAD")
 	if err != nil {
 		return nil, err
 	}
+
 	var changes []Change
+
 	for _, name := range names {
 		body, ok, exists := s.homeContent(name)
 		old, inHead := head[name]
@@ -299,30 +361,35 @@ func (s *Store) homeChanges() ([]Change, error) {
 		if _, inner, ok := strings.Cut(label, "/"); ok {
 			label = inner
 		}
-		c := Change{ID: name, Kind: "config", Name: name, Label: label}
+
+		c := Change{ID: name, Kind: kindConfig, Name: name, Label: label}
+
 		switch {
 		case inHead && !exists:
-			c.Op = "removed"
+			c.Op = opRemoved
 		case !ok:
 			continue
 		case !inHead:
-			c.Op = "added"
+			c.Op = opAdded
 		case string(old) != string(body):
-			c.Op = "modified"
+			c.Op = opModified
 		default:
 			continue
 		}
+
 		if !inHead {
 			old = nil
 		}
+
 		c.Added, c.Removed = numstat(diffBlobs(name, old, body, "--numstat"))
 		changes = append(changes, c)
 	}
+
 	return changes, nil
 }
 
 func numstat(out []byte) (added, removed int) {
-	fmt.Sscanf(string(out), "%d\t%d", &added, &removed)
+	_, _ = fmt.Sscanf(string(out), "%d\t%d", &added, &removed)
 	return added, removed
 }
 
@@ -333,22 +400,29 @@ func diffBlobs(name string, old, now []byte, args ...string) []byte {
 	if err != nil {
 		return nil
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
+
 	sides := []string{"/dev/null", "/dev/null"}
+
 	for i, body := range [][]byte{old, now} {
 		if body == nil {
 			continue
 		}
+
 		side := filepath.Join([]string{"a", "b"}[i], name)
 		if os.MkdirAll(filepath.Dir(filepath.Join(tmp, side)), 0o700) != nil ||
 			os.WriteFile(filepath.Join(tmp, side), body, 0o600) != nil {
 			return nil
 		}
+
 		sides[i] = side
 	}
-	cmd := exec.Command("git", append(append([]string{"diff", "--no-index", "--no-prefix"}, args...), "--", sides[0], sides[1])...)
+
+	gitArgs := slices.Concat([]string{"diff", "--no-index", "--no-prefix"}, args, []string{"--", sides[0], sides[1]})
+	cmd := exec.CommandContext(context.Background(), "git", gitArgs...)
 	cmd.Dir = tmp
 	out, _ := cmd.Output() // exit status 1 just means "files differ"
+
 	return out
 }
 
@@ -357,6 +431,7 @@ func (s *Store) realPath(name string) string {
 	if rel, ok := strings.CutPrefix(name, homePrefix); ok {
 		return filepath.Join(s.HomeDir, rel)
 	}
+
 	return filepath.Join(s.ConfigDir, name)
 }
 
@@ -366,6 +441,7 @@ func (s *Store) currentEntry(name string) ([]byte, bool) {
 		body, err := s.readHome(strings.TrimPrefix(name, homePrefix))
 		return body, err == nil
 	}
+
 	return readEntry(s.realPath(name))
 }
 
@@ -376,11 +452,13 @@ func (s *Store) canon(items []string) []string {
 		if !filepath.IsAbs(it) {
 			continue
 		}
+
 		if rel, err := filepath.Rel(s.ConfigDir, it); err == nil && filepath.IsLocal(rel) {
 			out[i] = filepath.ToSlash(rel)
 		} else if name, err := s.homeName(it); err == nil {
 			out[i] = name
 		}
 	}
+
 	return out
 }

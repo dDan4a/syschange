@@ -9,6 +9,25 @@ import (
 	"strings"
 )
 
+const (
+	kindConfig  = "config"
+	kindPackage = "package"
+	kindUnit    = "unit"
+
+	opAdded    = "added"
+	opModified = "modified"
+	opRemoved  = "removed"
+
+	groupPackages = "packages"
+	groupServices = "services"
+
+	scopeSystem = "system"
+	scopeUser   = "user"
+
+	packagesList = "packages"
+	unitsList    = "units"
+)
+
 // Change is one pending difference from the accepted state.
 type Change struct {
 	ID      string `json:"id"`   // "hypr/bindings.conf", "pkg:voxtype", "unit:user ydotool.service"
@@ -33,32 +52,40 @@ func (s *Store) Pending() ([]Change, error) {
 	if !s.Initialized() {
 		return nil, ErrNotInitialized
 	}
+
 	if err := s.autoExclude(); err != nil {
 		return nil, err
 	}
+
 	changes, err := s.configChanges()
 	if err != nil {
 		return nil, err
 	}
+
 	home, err := s.homeChanges()
 	if err != nil {
 		return nil, err
 	}
+
 	changes = append(changes, home...)
+
 	for _, src := range []struct {
 		kind, file string
 		list       func() ([]string, error)
-	}{{"package", "packages.txt", s.ListPackages}, {"unit", "units.txt", s.ListUnits}} {
+	}{{kindPackage, packagesList + ".txt", s.ListPackages}, {kindUnit, unitsList + ".txt", s.ListUnits}} {
 		accepted, err := readLines(s.path(src.file))
 		if err != nil {
 			return nil, err
 		}
+
 		now, err := src.list()
 		if err != nil {
 			return nil, err
 		}
+
 		changes = append(changes, setChanges(src.kind, accepted, now)...)
 	}
+
 	return changes, nil
 }
 
@@ -67,37 +94,46 @@ func (s *Store) configChanges() ([]Change, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	stat, err := s.numstat()
 	if err != nil {
 		return nil, err
 	}
+
 	var changes []Change
+
 	for _, entry := range splitNul(out) {
 		if len(entry) < 4 {
 			continue
 		}
+
 		code, path := entry[:2], entry[3:]
 		if isHome(path) {
 			continue
 		}
+
 		var op string
+
 		switch {
 		case code == "??":
-			op = "added"
+			op = opAdded
 			stat[path] = [2]int{countLines(filepath.Join(s.ConfigDir, path)), 0}
 		case strings.Contains(code, "D"):
-			op = "removed"
+			op = opRemoved
 		default:
-			op = "modified"
+			op = opModified
 		}
-		if op != "removed" && !s.trackable(path) {
+
+		if op != opRemoved && !s.trackable(path) {
 			continue
 		}
+
 		changes = append(changes, Change{
-			ID: path, Kind: "config", Op: op, Name: path, Label: fileLabel(path),
+			ID: path, Kind: kindConfig, Op: op, Name: path, Label: fileLabel(path),
 			Added: stat[path][0], Removed: stat[path][1],
 		})
 	}
+
 	return changes, nil
 }
 
@@ -106,16 +142,20 @@ func (s *Store) numstat() (map[string][2]int, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	stat := map[string][2]int{}
+
 	for _, rec := range splitNul(out) {
 		f := strings.SplitN(rec, "\t", 3)
 		if len(f) != 3 {
 			continue
 		}
+
 		added, _ := strconv.Atoi(f[0]) // "-" for binary files
 		removed, _ := strconv.Atoi(f[1])
 		stat[f[2]] = [2]int{added, removed}
 	}
+
 	return stat, nil
 }
 
@@ -124,88 +164,107 @@ func countLines(path string) int {
 	if err != nil || len(b) == 0 {
 		return 0
 	}
+
 	n := bytes.Count(b, []byte{'\n'})
 	if b[len(b)-1] != '\n' {
 		n++
 	}
+
 	return n
 }
 
 func setChanges(kind string, accepted, now []string) []Change {
 	var changes []Change
+
 	for _, name := range now {
 		if !slices.Contains(accepted, name) {
-			changes = append(changes, itemChange(kind, "added", name))
+			changes = append(changes, itemChange(kind, opAdded, name))
 		}
 	}
+
 	for _, name := range accepted {
 		if !slices.Contains(now, name) {
-			changes = append(changes, itemChange(kind, "removed", name))
+			changes = append(changes, itemChange(kind, opRemoved, name))
 		}
 	}
+
 	return changes
 }
 
 func itemChange(kind, op, name string) Change {
 	prefix := "pkg:"
 	label := name
-	if kind == "unit" {
+
+	if kind == kindUnit {
 		prefix = "unit:"
 		// "user ydotool.service" -> "ydotool.service (user)"
 		if scope, unit, ok := strings.Cut(name, " "); ok {
 			label = unit
-			if scope == "user" {
+			if scope == scopeUser {
 				label += " (user)"
 			}
 		}
 	}
+
 	return Change{ID: prefix + name, Kind: kind, Op: op, Name: name, Label: label}
 }
 
 // Groups orders changes for display: config apps by name, then packages, then services.
 func Groups(changes []Change) []Group {
 	var groups []Group
+
 	index := map[string]int{}
+
 	for _, c := range changes {
 		key, title := groupOf(c)
+
 		i, ok := index[key]
 		if !ok {
 			i = len(groups)
 			index[key] = i
 			groups = append(groups, Group{Key: key, Title: title})
 		}
+
 		groups[i].Changes = append(groups[i].Changes, c)
 	}
+
 	rank := func(g Group) int {
 		switch g.Key {
-		case "packages":
+		case groupPackages:
 			return 1
-		case "services":
+		case groupServices:
 			return 2
 		}
+
 		return 0
 	}
+
 	slices.SortStableFunc(groups, func(a, b Group) int {
 		if d := rank(a) - rank(b); d != 0 {
 			return d
 		}
+
 		return strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
 	})
+
 	return groups
 }
 
 func groupOf(c Change) (key, title string) {
 	switch c.Kind {
-	case "package":
-		return "packages", "Packages"
-	case "unit":
-		return "services", "Services"
+	case kindPackage:
+		return groupPackages, "Packages"
+	case kindUnit:
+		return groupServices, "Services"
 	}
+
 	if rel, ok := strings.CutPrefix(c.Name, homePrefix); ok {
 		top, _, _ := strings.Cut(rel, "/")
 		return homePrefix + top, homePrefix + top
 	}
+
 	top, _, _ := strings.Cut(c.Name, "/")
+
 	return top, appName(top)
 }
 
@@ -215,21 +274,26 @@ func Select(changes []Change, items []string) []Change {
 	if len(items) == 0 {
 		return changes
 	}
+
 	var out []Change
+
 	for _, c := range changes {
 		key, _ := groupOf(c)
+
 		for _, it := range items {
 			it = strings.TrimSuffix(it, "/")
-			if it == c.ID || it == key || (c.Kind != "config" && it == c.Name) ||
-				(c.Kind == "config" && strings.HasPrefix(c.Name, it+"/")) {
+			if it == c.ID || it == key || (c.Kind != kindConfig && it == c.Name) ||
+				(c.Kind == kindConfig && strings.HasPrefix(c.Name, it+"/")) {
 				out = append(out, c)
 				break
 			}
 		}
 	}
+
 	return out
 }
 
+//nolint:goconst // directory names under ~/.config; equal subcommand and author names are a coincidence
 var apps = map[string]string{
 	"hypr": "Hyprland", "omarchy": "Omarchy", "alacritty": "Alacritty", "ghostty": "Ghostty",
 	"kitty": "Kitty", "foot": "Foot", "walker": "Walker", "elephant": "Elephant", "mako": "Mako",
@@ -246,6 +310,7 @@ func appName(top string) string {
 	if name, ok := apps[top]; ok {
 		return name
 	}
+
 	return top
 }
 
@@ -264,6 +329,7 @@ func fileLabel(path string) string {
 	if label, ok := fileLabels[stem]; ok {
 		return label
 	}
+
 	parts := strings.Split(path, "/")
 	switch {
 	case len(parts) >= 3 && parts[0] == "omarchy" && parts[1] == "themes":
@@ -277,5 +343,6 @@ func fileLabel(path string) string {
 	case len(parts) == 1:
 		return parts[0]
 	}
+
 	return strings.Join(parts[1:], "/")
 }

@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import qs.Commons
@@ -6,16 +8,16 @@ import qs.Ui
 Panel {
   id: root
   moduleName: "dan4a.syschange"
-  ipcTarget: moduleName
+  ipcTarget: root.moduleName
   manageIpc: false
 
   property var anchorItem: null
   property var hostWidget: null
   property var source: null
   readonly property var barIdentity: hostWidget || root
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color foreground: root.bar ? root.bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.4)
-  readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+  readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
 
   readonly property var groups: source ? source.pending : []
   readonly property var history: source ? source.history : []
@@ -24,138 +26,270 @@ Panel {
   property int selected: 0
   property string editingKey: ""   // group being described
   property real now: Date.now()    // what ago() counts from: the lists keep their delegates while their data stays the same
+  readonly property string keyHelp: "↑↓ select · Enter describe · a AI · A AI all · s keep · o/v diff · / search · "
+                                    + "c checkpoint · r refresh, clear error"
   property string armed: ""        // destructive action waiting for a second click: "revert:<id>", "ignore:<group>", "undo:<entry>"
 
-  function open() { root.selected = 0; root.editingKey = ""; root.controller.show() }
-  function close() { root.editingKey = ""; if (root.searching) root.closeSearch(); root.controller.hide() }
-  function toggle() { root.opened ? root.close() : root.open() }
+  function open() {
+    root.selected = 0
+    root.editingKey = ""
+    root.controller.show()
+  }
+  function close() {
+    root.editingKey = ""
+    if (root.searching)
+      root.closeSearch()
+    root.controller.hide()
+  }
+  function toggle() {
+    root.opened ? root.close() : root.open()
+  }
   function switchPanel(direction) {
     if (root.bar && typeof root.bar.switchPanelFrom === "function")
       return root.bar.switchPanelFrom(root.barIdentity, direction)
     return false
   }
 
-  function current() { return groups.length > 0 ? groups[Math.min(selected, groups.length - 1)] : null }
+  function current() {
+    return groups.length > 0 ? groups[Math.min(selected, groups.length - 1)] : null
+  }
 
   function describe(group, text) {
-    if (!group) return
+    if (!group)
+      return
     editingKey = group.key
-    Qt.callLater(function() { var f = noteLoader.item; if (f) { f.text = text || ""; f.forceActiveFocus(); f.selectAll() } })
+    Qt.callLater(function () {
+      var f = noteLoader.item
+      if (f) {
+        f.text = text || ""
+        f.forceActiveFocus()
+        f.selectAll()
+      }
+    })
   }
 
   // Only the panel that asked (one per monitor) saves the answer, straight away:
   // an answer shown in the shared text field ended up under whatever group was selected by then.
   property string askedKey: ""
   function suggest(group) {
-    if (!group || !root.source || root.source.suggestingKey !== "") return
+    if (!group || !root.source || root.source.suggestingKey !== "")
+      return
     askedKey = group.key
     root.source.suggest(group.key)
   }
   Connections {
     target: root.source
     function onSuggested(key, text) {
-      if (key !== root.askedKey) return
+      if (key !== root.askedKey)
+        return
       root.askedKey = ""
-      if (text !== "") root.source.note(key, text)
+      if (text !== "")
+        root.source.note(key, text)
     }
   }
   function cancelDescribe() {
     editingKey = ""
-    Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+    Qt.callLater(function () {
+      if (keyCatcher)
+        keyCatcher.forceActiveFocus()
+    })
   }
   function commitDescribe() {
     var text = noteLoader.item ? noteLoader.item.text.trim() : ""
-    if (source && editingKey === "@checkpoint") source.checkpoint(text)
-    else if (text !== "" && source) source.note(editingKey, text)
+    if (source && editingKey === "@checkpoint")
+      source.checkpoint(text)
+    else if (text !== "" && source)
+      source.note(editingKey, text)
     cancelDescribe()
   }
   function openSearch() {
     searching = true
-    Qt.callLater(function() { var f = searchLoader.item; if (f) { f.forceActiveFocus(); f.selectAll() } })
+    Qt.callLater(function () {
+      var f = searchLoader.item
+      if (f) {
+        f.forceActiveFocus()
+        f.selectAll()
+      }
+    })
   }
   function closeSearch() {
     searching = false
     searchDelay.stop()
-    if (source) source.search("")
-    Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+    if (source)
+      source.search("")
+    Qt.callLater(function () {
+      if (keyCatcher)
+        keyCatcher.forceActiveFocus()
+    })
   }
   function newCheckpoint() {
     editingKey = "@checkpoint"
-    Qt.callLater(function() { var f = noteLoader.item; if (f) { f.text = ""; f.forceActiveFocus() } })
+    Qt.callLater(function () {
+      var f = noteLoader.item
+      if (f) {
+        f.text = ""
+        f.forceActiveFocus()
+      }
+    })
   }
 
   // Destructive actions take two clicks: the first arms, the second runs.
   function confirm(key, action) {
-    if (armed !== key) { armed = key; disarm.restart(); return }
+    if (armed !== key) {
+      armed = key
+      disarm.restart()
+      return
+    }
     armed = ""
     action()
   }
-  function revert(change) { confirm("revert:" + change.id, function() { root.source.revert(change.id) }) }
+  function revert(change) {
+    confirm("revert:" + change.id, function () {
+      root.source.revert(change.id)
+    })
+  }
   // No trailing "/": a group can be one top-level file (mimeapps.list).
-  function ignoreGroup(group) { confirm("ignore:" + group.key, function() { root.source.ignore(group.key) }) }
+  function ignoreGroup(group) {
+    confirm("ignore:" + group.key, function () {
+      root.source.ignore(group.key)
+    })
+  }
   function toggleDiff(group) {
-    if (!root.source) return
+    if (!root.source)
+      return
     root.source.showDiff(root.source.diffKey === group.key ? "" : group.key)
   }
   function diffColor(kind) {
     return kind === "add" ? Color.accent : kind === "del" ? Color.urgent : kind === "file" ? root.foreground : root.dim
   }
 
-  function restoreCheckpoint(cp) { confirm("restore:" + cp.commit, function() { root.source.restore(cp.commit) }) }
-  function undoEntry(entry) { confirm("undo:" + entry.time, function() { root.source.undo(entry.time) }) }
+  function restoreCheckpoint(cp) {
+    confirm("restore:" + cp.commit, function () {
+      root.source.restore(cp.commit)
+    })
+  }
+  function undoEntry(entry) {
+    confirm("undo:" + entry.time, function () {
+      root.source.undo(entry.time)
+    })
+  }
   // An Omarchy update changed files you had edited: take its change back out of just those.
-  function keepMine(entry) { confirm("keep:" + entry.time, function() { root.source.undo(entry.time, entry.touched) }) }
+  function keepMine(entry) {
+    confirm("keep:" + entry.time, function () {
+      root.source.undo(entry.time, entry.touched)
+    })
+  }
 
   // Who wrote the entry, or else which agents made its changes.
+  function heroMeta() {
+    if (!root.source)
+      return ""
+    if (root.source.missing)
+      return "Not installed"
+    if (!root.source.initialized)
+      return "Not tracking yet"
+    if (root.source.count === 0)
+      return "Everything is recorded"
+    return root.source.count + " new" + (root.source.overdue ? ", waiting " + root.source.pendingDays + " days" : "")
+  }
+  function cliNotice() {
+    if (!root.source)
+      return ""
+    if (!root.source.missing)
+      return "syschange " + root.source.version + " is older than this widget expects (" + root.source.cliVersion + ")."
+    const install = "This widget needs the syschange command. Install builds it from github.com/dDan4a/syschange (v" + root.source.cliVersion
+          + ") into ~/.local/bin with Go. No Go yet? mise fetches one just for the build. Then tracking starts."
+    const binary = root.source.binary
+    if (binary.indexOf("/") >= 0 && binary.indexOf("/.local/bin/") < 0)
+      return install + " Your widget settings point at " + binary + ": clear that setting to use the installed one."
+    return install
+  }
   function entryAuthor(e) {
-    if (e.by) return e.by
+    if (e.by)
+      return e.by
     var seen = []
-    for (var i = 0; i < e.changes.length; i++)
-      if (e.changes[i].by && seen.indexOf(e.changes[i].by) < 0) seen.push(e.changes[i].by)
+    for (let i = 0; i < e.changes.length; i++)
+      if (e.changes[i].by && seen.indexOf(e.changes[i].by) < 0)
+        seen.push(e.changes[i].by)
     return seen.join(", ")
   }
 
   // Omarchy's default agent comes first and alone; the other installed agents
   // are offered once it is connected.
   function agentsToConnect() {
-    if (!root.source) return []
+    if (!root.source)
+      return []
     var all = root.source.agents
-    var def = all.filter(function(a) { return a["default"] && !a.connected })
-    return def.length > 0 ? def : all.filter(function(a) { return !a.connected })
+    var def = all.filter(function (a) {
+      return a["default"] && !a.connected
+    })
+    return def.length > 0 ? def : all.filter(function (a) {
+      return !a.connected
+    })
   }
   function agentsCaption() {
-    if (!root.source) return ""
-    var connected = root.source.agents.filter(function(a) { return a.connected }).map(function(a) { return a.title })
+    if (!root.source)
+      return ""
+    var connected = root.source.agents.filter(function (a) {
+      return a.connected
+    }).map(function (a) {
+      return a.title
+    })
     var next = agentsToConnect()
-    if (next.length === 0) return "󰚩 " + connected.join(", ") + (connected.length > 1 ? " describe the changes they make" : " describes the changes it makes")
-    if (connected.length > 0) return "󰚩 " + connected.join(", ") + " connected. Also:"
-    if (next.length === 1) return "󰚩 Let " + next[0].title + " describe the system changes it makes"
+    if (next.length === 0)
+      return "󰚩 " + connected.join(", ") + (connected.length > 1 ? " describe the changes they make" : " describes the changes it makes")
+    if (connected.length > 0)
+      return "󰚩 " + connected.join(", ") + " connected. Also:"
+    if (next.length === 1)
+      return "󰚩 Let " + next[0].title + " describe the system changes it makes"
     return "󰚩 Let your AI agents describe the system changes they make"
   }
 
-  function sign(op) { return op === "added" ? "+" : op === "removed" ? "−" : "~" }
-  function opColor(op) { return op === "added" ? Color.accent : op === "removed" ? Color.urgent : root.foreground }
+  function sign(op) {
+    return op === "added" ? "+" : op === "removed" ? "−" : "~"
+  }
+  function opColor(op) {
+    return op === "added" ? Color.accent : op === "removed" ? Color.urgent : root.foreground
+  }
   function changeText(c) {
     var text = c.label
-    if (c.kind === "package") text = (c.op === "added" ? "Installed " : "Removed ") + c.label
-    else if (c.kind === "unit") text = (c.op === "added" ? "Enabled " : "Disabled ") + c.label
-    if (c.added || c.removed) text += "  +" + (c.added || 0) + " −" + (c.removed || 0)
-    if (c.by) text += "  󰚩 " + c.by
+    if (c.kind === "package")
+      text = (c.op === "added" ? "Installed " : "Removed ") + c.label
+    else if (c.kind === "unit")
+      text = (c.op === "added" ? "Enabled " : "Disabled ") + c.label
+    if (c.added || c.removed)
+      text += "  +" + (c.added || 0) + " −" + (c.removed || 0)
+    if (c.by)
+      text += "  󰚩 " + c.by
     return text
   }
 
   function ago(iso) {
     var s = Math.max(0, (root.now - new Date(iso).getTime()) / 1000)
-    if (s < 60) return "now"
-    if (s < 3600) return Math.floor(s / 60) + "m ago"
-    if (s < 86400) return Math.floor(s / 3600) + "h ago"
+    if (s < 60)
+      return "now"
+    if (s < 3600)
+      return Math.floor(s / 60) + "m ago"
+    if (s < 86400)
+      return Math.floor(s / 3600) + "h ago"
     return new Date(iso).toLocaleDateString(Qt.locale(), "d MMM")
   }
-  onGroupsChanged: if (selected >= groups.length) selected = Math.max(0, groups.length - 1)
+  onGroupsChanged: if (selected >= groups.length)
+                     selected = Math.max(0, groups.length - 1)
 
-  Timer { id: disarm; interval: 4000; onTriggered: root.armed = "" }
-  onOpenedChanged: if (opened) now = Date.now()
-  Timer { interval: 60000; running: root.opened; repeat: true; onTriggered: root.now = Date.now() }
+  Timer {
+    id: disarm
+    interval: 4000
+    onTriggered: root.armed = ""
+  }
+  onOpenedChanged: if (root.opened)
+                     root.now = Date.now()
+  Timer {
+    interval: 60000
+    running: root.opened
+    repeat: true
+    onTriggered: root.now = Date.now()
+  }
 
   KeyboardPanel {
     id: panel
@@ -171,28 +305,45 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       blocked: root.editingKey !== "" || (searchLoader.item !== null && searchLoader.item.activeFocus)
-      onMoveRequested: function(dx, dy) {
-        if (root.groups.length === 0) return
+      onMoveRequested: function (dx, dy) {
+        if (root.groups.length === 0)
+          return
         root.selected = Math.max(0, Math.min(root.groups.length - 1, root.selected + dy))
         pendingList.positionViewAtIndex(root.selected, ListView.Contain)
       }
       onActivateRequested: root.describe(root.current())
       onCloseRequested: root.close()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
-      onTextKey: function(text) {
+      onTabRequested: function (direction) {
+        root.switchPanel(direction)
+      }
+      onTextKey: function (text) {
         var key = text.toLowerCase(), g = root.current()
-        if (!root.source) return
-        if (text === "A") { if (root.source.suggestingKey === "" && root.groups.length > 0) root.source.suggestAll() }
-        else if (key === "r") { root.source.dismissError(); root.source.refresh() }
-        else if (key === "c") root.newCheckpoint()
-        else if (key === "m") root.source.exportMarkdown()
-        else if (key === "/") root.openSearch()
-        else if (!g) return
-        else if (key === "d") root.describe(g)
-        else if (key === "s") root.source.skip(g.key)
-        else if (key === "v") root.source.openDiff(g.key)
-        else if (key === "o") root.toggleDiff(g)
-        else if (key === "a") root.suggest(g)
+        if (!root.source)
+          return
+        if (text === "A") {
+          if (root.source.suggestingKey === "" && root.groups.length > 0)
+            root.source.suggestAll()
+        } else if (key === "r") {
+          root.source.dismissError()
+          root.source.refresh()
+        } else if (key === "c")
+          root.newCheckpoint()
+        else if (key === "m")
+          root.source.exportMarkdown()
+        else if (key === "/")
+          root.openSearch()
+        else if (!g)
+          return
+        else if (key === "d")
+          root.describe(g)
+        else if (key === "s")
+          root.source.skip(g.key)
+        else if (key === "v")
+          root.source.openDiff(g.key)
+        else if (key === "o")
+          root.toggleDiff(g)
+        else if (key === "a")
+          root.suggest(g)
       }
 
       // The panel caps its height on small screens; the content scrolls instead of being cut.
@@ -211,9 +362,7 @@ Panel {
           PanelHero {
             width: parent.width
             title: "System changes"
-            meta: !root.source ? "" : root.source.missing ? "Not installed" : !root.source.initialized ? "Not tracking yet"
-              : root.source.count === 0 ? "Everything is recorded"
-              : root.source.count + " new" + (root.source.overdue ? ", waiting " + root.source.pendingDays + " days" : "")
+            meta: root.heroMeta()
             detail: root.source && root.source.error !== "" ? "Error" : ""
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -259,10 +408,7 @@ Panel {
             spacing: Style.space(8)
             Text {
               width: parent.width
-              text: root.source && root.source.missing
-                ? "This widget needs the syschange command. Install builds it from github.com/dDan4a/syschange (v" + root.source.cliVersion + ") into ~/.local/bin with Go. No Go yet? mise fetches one just for the build. Then tracking starts."
-                  + (root.source.binary.indexOf("/") >= 0 && root.source.binary.indexOf("/.local/bin/") < 0 ? " Your widget settings point at " + root.source.binary + ": clear that setting to use the installed one." : "")
-                : "syschange " + (root.source ? root.source.version : "") + " is older than this widget expects (" + (root.source ? root.source.cliVersion : "") + ")."
+              text: root.cliNotice()
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
@@ -283,7 +429,8 @@ Panel {
             spacing: Style.space(8)
             Text {
               width: parent.width
-              text: "Keep a history of your config files in ~/.config, installed packages and enabled services. Describe each change in one line, see the diff and undo it."
+              text: "Keep a history of your config files in ~/.config, installed packages and enabled services. "
+                    + "Describe each change in one line, see the diff and undo it."
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
@@ -313,7 +460,8 @@ Panel {
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               iconText: working ? "󰔟" : "󰁨" // nf-md-timer_sand / nf-md-auto_fix
-              tooltipText: working ? "Describing every change with AI…" : "Describe all with AI (A): your default agent describes each app's changes and saves them"
+              tooltipText: working ? "Describing every change with AI…" :
+                                     "Describe all with AI (A): your default agent describes each app's changes and saves them"
               foreground: working ? Color.accent : root.foreground
               enabled: root.source !== null && root.source.suggestingKey === ""
               onClicked: root.source.suggestAll()
@@ -341,8 +489,12 @@ Panel {
               radius: Style.space(6)
               color: isSelected || hover.hovered ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08) : "transparent"
 
-              HoverHandler { id: hover }
-              TapHandler { onTapped: root.selected = groupItem.index }
+              HoverHandler {
+                id: hover
+              }
+              TapHandler {
+                onTapped: root.selected = groupItem.index
+              }
 
               Column {
                 id: groupColumn
@@ -356,14 +508,18 @@ Panel {
                   height: Math.max(titleText.implicitHeight, actions.implicitHeight)
                   TapHandler {
                     enabled: groupItem.modelData.key !== "packages" && groupItem.modelData.key !== "services"
-                    onTapped: { root.selected = groupItem.index; root.toggleDiff(groupItem.modelData) }
+                    onTapped: {
+                      root.selected = groupItem.index
+                      root.toggleDiff(groupItem.modelData)
+                    }
                   }
                   Text {
                     id: titleText
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.right: actions.left
-                    text: root.armed === "ignore:" + groupItem.modelData.key ? "Click again to stop tracking " + groupItem.modelData.title : groupItem.modelData.title
+                    text: root.armed === "ignore:" + groupItem.modelData.key ? "Click again to stop tracking " + groupItem.modelData.title :
+                                                                               groupItem.modelData.title
                     color: root.armed === "ignore:" + groupItem.modelData.key ? Color.urgent : root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.subtitle
@@ -379,7 +535,10 @@ Panel {
                       iconText: "󰏫" // nf-md-pencil
                       tooltipText: "Describe why (Enter)"
                       foreground: root.foreground
-                      onClicked: { root.selected = groupItem.index; root.describe(groupItem.modelData) }
+                      onClicked: {
+                        root.selected = groupItem.index
+                        root.describe(groupItem.modelData)
+                      }
                     }
                     PanelActionButton {
                       readonly property bool working: root.source !== null && root.source.suggestingKey === groupItem.modelData.key
@@ -448,7 +607,7 @@ Panel {
                       anchors.right: undo.left
                       anchors.verticalCenter: parent.verticalCenter
                       visible: changeItem.modelData.kind === "config"
-                      width: visible ? implicitWidth : 0
+                      width: ignoreFile.visible ? ignoreFile.implicitWidth : 0
                       iconText: "󰈉" // nf-md-eye_off
                       tooltipText: "Stop tracking this file"
                       foreground: root.dim
@@ -514,7 +673,8 @@ Panel {
             width: parent.width
             sourceComponent: LineEdit {
               width: noteLoader.width
-              placeholderText: root.editingKey === "@checkpoint" ? "Checkpoint name, for example: before new animations (empty: date)" : "Why? For example: voice typing on Super+R"
+              placeholderText: root.editingKey === "@checkpoint" ? "Checkpoint name, for example: before new animations (empty: date)" :
+                                                                   "Why? For example: voice typing on Super+R"
               foreground: root.foreground
               fontFamily: root.fontFamily
               onCanceled: root.cancelDescribe()
@@ -522,7 +682,10 @@ Panel {
             }
           }
 
-          PanelSeparator { width: parent.width; visible: root.history.length > 0 }
+          PanelSeparator {
+            width: parent.width
+            visible: root.history.length > 0
+          }
 
           Item {
             visible: root.history.length > 0
@@ -553,9 +716,9 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
               iconText: b && b.error ? "󰅤" : "󰅠" // nf-md-cloud_alert / nf-md-cloud_upload
               foreground: b && b.error ? Color.urgent : root.dim
-              tooltipText: !b ? "" : b.error ? "Backup to " + b.remote + " failed: " + b.error + ". Click to retry"
-                : new Date(b.time).getFullYear() < 2000 ? "Backup to " + b.remote + ": not pushed yet. Click to push now"
-                : "Backed up to " + b.remote + ", " + root.ago(b.time) + ". Click to push now"
+              tooltipText: !b ? "" : b.error ? "Backup to " + b.remote + " failed: " + b.error + ". Click to retry" : new Date(b.time).getFullYear()
+                                               < 2000 ? "Backup to " + b.remote + ": not pushed yet. Click to push now" : "Backed up to " + b.remote
+                                                        + ", " + root.ago(b.time) + ". Click to push now"
               onClicked: root.source.push()
             }
             PanelActionButton {
@@ -587,7 +750,8 @@ Panel {
           Timer {
             id: searchDelay
             interval: 250
-            onTriggered: if (root.source && searchLoader.item) root.source.search(searchLoader.item.text.trim())
+            onTriggered: if (root.source && searchLoader.item)
+                           root.source.search(searchLoader.item.text.trim())
           }
 
           Text {
@@ -638,8 +802,11 @@ Panel {
 
                 Text {
                   width: parent.width
-                  text: entryItem.armed ? "Click again to undo this"
-                    : (entryItem.modelData.note || "No description") + (root.entryAuthor(entryItem.modelData) ? "  󰚩 " + root.entryAuthor(entryItem.modelData) : "")
+                  text: entryItem.armed ? "Click again to undo this" : (entryItem.modelData.note || "No description") + (root.entryAuthor(
+                                                                                                                           entryItem.modelData)
+                                                                                                                         ? "  󰚩 " + root.entryAuthor(
+                                                                                                                             entryItem.modelData) :
+                                                                                                                           "")
                   color: entryItem.armed ? Color.urgent : entryItem.modelData.note ? root.foreground : root.dim
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
@@ -658,8 +825,9 @@ Panel {
                     anchors.left: parent.left
                     anchors.right: keepButton.left
                     anchors.verticalCenter: parent.verticalCenter
-                    text: parent.armed ? "Click again to bring your version back"
-                      : "Changed your edits: " + (entryItem.modelData.touched || []).join(", ")
+                    text: parent.armed ? "Click again to bring your version back" : "Changed your edits: " + (entryItem.modelData.touched || []).join(
+                                           ", ")
+
                     color: Color.urgent
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
@@ -699,7 +867,10 @@ Panel {
             }
           }
 
-          PanelSeparator { width: parent.width; visible: root.source !== null && root.source.initialized }
+          PanelSeparator {
+            width: parent.width
+            visible: root.source !== null && root.source.initialized
+          }
 
           Item {
             visible: root.source !== null && root.source.initialized
@@ -747,8 +918,8 @@ Panel {
                 anchors.left: parent.left
                 anchors.right: cpRestore.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: cpItem.armed ? "Click again to restore config files to “" + cpItem.modelData.name + "”"
-                  : cpItem.modelData.name + "  ·  " + root.ago(cpItem.modelData.time)
+                text: cpItem.armed ? "Click again to restore config files to “" + cpItem.modelData.name + "”" : cpItem.modelData.name + "  ·  "
+                                     + root.ago(cpItem.modelData.time)
                 color: cpItem.armed ? Color.urgent : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
@@ -790,16 +961,20 @@ Panel {
               visible: root.source !== null && !root.source.agentsConnected
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
-              text: "Connect " + root.agentsToConnect().map(function(a) { return a.title }).join(" + ")
+              text: "Connect " + root.agentsToConnect().map(function (a) {
+                return a.title
+              }).join(" + ")
               bordered: true
               tooltipText: "Adds the syschange skill and hooks. Undo: syschange agents remove"
-              onClicked: root.source.connectAgents(root.agentsToConnect().map(function(a) { return a.name }))
+              onClicked: root.source.connectAgents(root.agentsToConnect().map(function (a) {
+                return a.name
+              }))
             }
           }
 
           Text {
             width: parent.width
-            text: root.editingKey !== "" ? "Enter save · Esc cancel" : "↑↓ select · Enter describe · a AI · A AI all · s keep · o/v diff · / search · c checkpoint · r refresh, clear error"
+            text: root.editingKey !== "" ? "Enter save · Esc cancel" : root.keyHelp
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

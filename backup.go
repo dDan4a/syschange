@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,10 +18,15 @@ import (
 // checkpoints), plus the checkpoint refs. Secrets never reach it: they are
 // never in the history in the first place.
 
-const backupRemote = "backup"
+const (
+	backupRemote       = "backup"
+	backupConfigBranch = "config"
+)
 
 // stateFiles are copied into the "state" branch when they exist.
-var stateFiles = []string{"journal.jsonl", "packages.txt", "packages.init.txt", "packages.aur.txt", "units.txt", "units.init.txt", "checkpoints.jsonl", "tracked.txt"}
+var stateFiles = []string{
+	"journal.jsonl", "packages.txt", "packages.init.txt", "packages.aur.txt", "units.txt", "units.init.txt", "checkpoints.jsonl", "tracked.txt",
+}
 
 type PushStatus struct {
 	Remote string    `json:"remote"`
@@ -33,6 +39,7 @@ func (s *Store) RemoteURL() string {
 	if err != nil {
 		return ""
 	}
+
 	return strings.TrimSpace(string(out))
 }
 
@@ -41,18 +48,25 @@ func (s *Store) SetRemote(url string) error {
 	if !s.Initialized() {
 		return ErrNotInitialized
 	}
+
 	if s.RemoteURL() != "" {
 		if _, err := s.git(nil, "remote", "remove", backupRemote); err != nil {
 			return err
 		}
 	}
+
 	if url == "" {
-		os.Remove(s.path("push.json"))
+		if err := os.Remove(s.path("push.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+
 		return nil
 	}
+
 	if _, err := s.git(nil, "remote", "add", backupRemote, url); err != nil {
 		return err
 	}
+
 	return s.Push()
 }
 
@@ -67,22 +81,30 @@ func (s *Store) Push() error {
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
+
 	err = s.commitState()
 	if err == nil {
 		// Never ask for a password: this runs in the background.
 		env := []string{"GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND=ssh -oBatchMode=yes"}
 		_, err = s.gitEnv(env, nil, "push", "--quiet", backupRemote,
-			"HEAD:refs/heads/config", "refs/heads/state:refs/heads/state", "refs/checkpoints/*:refs/checkpoints/*")
+			"HEAD:refs/heads/"+backupConfigBranch, "refs/heads/state:refs/heads/state", "refs/checkpoints/*:refs/checkpoints/*")
 	}
+
 	st := PushStatus{Remote: url, Time: time.Now()}
 	if err != nil {
 		st.Error = err.Error()
 	}
-	b, _ := json.Marshal(st)
-	if werr := os.WriteFile(s.path("push.json"), b, 0o600); werr != nil && err == nil {
+
+	b, werr := json.Marshal(st)
+	if werr == nil {
+		werr = os.WriteFile(s.path("push.json"), b, 0o600)
+	}
+
+	if werr != nil && err == nil {
 		err = werr
 	}
+
 	return err
 }
 
@@ -91,10 +113,12 @@ func (s *Store) LastPush() *PushStatus {
 	if err != nil {
 		return nil
 	}
+
 	var st PushStatus
 	if json.Unmarshal(b, &st) != nil {
 		return nil
 	}
+
 	return &st
 }
 
@@ -108,39 +132,51 @@ func (s *Store) commitState() error {
 			}
 		}
 	}
+
 	var tree strings.Builder
+
 	for _, name := range stateFiles {
 		body, err := os.ReadFile(s.path(name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
+
 		if err != nil {
 			return err
 		}
+
 		blob, err := s.git(body, "hash-object", "-w", "--stdin")
 		if err != nil {
 			return err
 		}
+
 		fmt.Fprintf(&tree, "100644 blob %s\t%s\n", strings.TrimSpace(string(blob)), name)
 	}
+
 	treeID, err := s.git([]byte(tree.String()), "mktree")
 	if err != nil {
 		return err
 	}
+
 	treeSHA := strings.TrimSpace(string(treeID))
 	args := []string{"commit-tree", treeSHA, "-m", "syschange state"}
+
 	if parent, err := s.git(nil, "rev-parse", "--verify", "--quiet", "refs/heads/state"); err == nil {
 		p := strings.TrimSpace(string(parent))
 		if old, err := s.git(nil, "rev-parse", p+"^{tree}"); err == nil && strings.TrimSpace(string(old)) == treeSHA {
 			return nil
 		}
+
 		args = append(args, "-p", p)
 	}
+
 	commit, err := s.git(nil, args...)
 	if err != nil {
 		return err
 	}
+
 	_, err = s.git(nil, "update-ref", "refs/heads/state", strings.TrimSpace(string(commit)))
+
 	return err
 }
 
@@ -150,9 +186,11 @@ func spawnPush() {
 	if err != nil {
 		return
 	}
-	cmd := exec.Command(exe, "push", "--quiet")
+
+	cmd := exec.CommandContext(context.Background(), exe, "push", "--quiet")
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if cmd.Start() == nil {
-		go cmd.Wait()
+		go func() { _ = cmd.Wait() }()
 	}
 }

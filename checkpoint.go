@@ -29,65 +29,81 @@ func (s *Store) Checkpoint(name string) (Checkpoint, error) {
 	if !s.Initialized() {
 		return Checkpoint{}, ErrNotInitialized
 	}
+
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = time.Now().Format("2006-01-02 15:04")
 	}
+
 	pending, err := s.Pending()
 	if err != nil {
 		return Checkpoint{}, err
 	}
+
 	var paths, home []string
+
 	for _, c := range pending {
 		switch {
-		case c.Kind == "config" && isHome(c.Name):
+		case c.Kind == kindConfig && isHome(c.Name):
 			home = append(home, c.Name)
-		case c.Kind == "config":
+		case c.Kind == kindConfig:
 			paths = append(paths, c.Name)
 		}
 	}
 	// A private index: the real one stays equal to HEAD, which status relies on.
 	index := s.path("checkpoint.index")
-	defer os.Remove(index)
+	defer func() { _ = os.Remove(index) }()
+
 	env := []string{"GIT_INDEX_FILE=" + index}
 	if _, err := s.gitEnv(env, nil, "read-tree", "HEAD"); err != nil {
 		return Checkpoint{}, err
 	}
+
 	if len(paths) > 0 {
 		if _, err := s.gitEnv(env, nulJoin(paths), "add", "--all", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 			return Checkpoint{}, err
 		}
 	}
+
 	if err := s.stageHome(env, home); err != nil {
 		return Checkpoint{}, err
 	}
+
 	tree, err := s.gitEnv(env, nil, "write-tree")
 	if err != nil {
 		return Checkpoint{}, err
 	}
+
 	commit, err := s.git(nil, "commit-tree", strings.TrimSpace(string(tree)), "-p", "HEAD", "-m", "checkpoint: "+name)
 	if err != nil {
 		return Checkpoint{}, err
 	}
+
 	cp := Checkpoint{Name: name, Time: time.Now(), Commit: strings.TrimSpace(string(commit))}
 	// A ref keeps the commit from being garbage-collected.
 	if _, err := s.git(nil, "update-ref", "refs/checkpoints/"+strconv.FormatInt(cp.Time.UnixNano(), 10), cp.Commit); err != nil {
 		return Checkpoint{}, err
 	}
+
 	if cp.Packages, err = s.ListPackages(); err != nil {
 		return Checkpoint{}, err
 	}
+
 	if cp.Units, err = s.ListUnits(); err != nil {
 		return Checkpoint{}, err
 	}
+
 	b, err := json.Marshal(cp)
 	if err != nil {
 		return Checkpoint{}, err
 	}
+
 	if err := appendLines(s.path("checkpoints.jsonl"), []string{string(b)}); err != nil {
 		return cp, err
 	}
+
 	s.afterChange()
+
 	return cp, nil
 }
 
@@ -97,21 +113,29 @@ func (s *Store) Checkpoints() ([]Checkpoint, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+
+	defer func() { _ = f.Close() }()
+
 	var out []Checkpoint
+
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64<<10), 16<<20)
+
 	for sc.Scan() {
 		var cp Checkpoint
 		if err := json.Unmarshal(sc.Bytes(), &cp); err != nil {
 			return nil, fmt.Errorf("checkpoints.jsonl: %w", err)
 		}
+
 		out = append(out, cp)
 	}
+
 	slices.Reverse(out)
+
 	return out, sc.Err()
 }
 
@@ -124,24 +148,31 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	if err != nil {
 		return "", err
 	}
+
 	i := slices.IndexFunc(all, func(cp Checkpoint) bool { return cp.Name == name || cp.Commit == name })
 	if i < 0 {
 		return "", fmt.Errorf("no checkpoint %q", name)
 	}
+
 	target := all[i]
+
 	if risky, err := s.unsaved(); err != nil {
 		return "", err
 	} else if len(risky) > 0 {
-		return "", fmt.Errorf("these files have changes a checkpoint cannot keep (secrets, binary or large files), so a restore would lose them: %s. Revert them or stop tracking them first", strings.Join(risky, ", "))
+		return "", fmt.Errorf("these files have changes a checkpoint cannot keep (secrets, binary or large files), "+
+			"so a restore would lose them: %s. Revert them or stop tracking them first", strings.Join(risky, ", "))
 	}
+
 	before, err := s.Checkpoint("Before restoring " + target.Name)
 	if err != nil {
 		return "", err
 	}
+
 	savedTree, err := s.git(nil, "ls-tree", "-r", "--name-only", "-z", before.Commit)
 	if err != nil {
 		return "", err
 	}
+
 	saved := splitNul(savedTree)
 
 	// Files of the checkpoint come back; files it did not have go away. The
@@ -150,26 +181,34 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	if err != nil {
 		return "", err
 	}
+
 	keep := splitNul(inTree)
+
 	inIndex, err := s.git(nil, "ls-files", "-z")
 	if err != nil {
 		return "", err
 	}
+
 	var restore []string
+
 	seen := map[string]bool{}
 	for _, f := range append(slices.Clone(keep), splitNul(inIndex)...) {
 		if isHome(f) || seen[f] {
 			continue
 		}
+
 		seen[f] = true
 		// A file the checkpoint above could not keep (ignored since, or a secret) stays as it is.
 		if _, err := os.Lstat(filepath.Join(s.ConfigDir, f)); err == nil && !slices.Contains(saved, f) {
 			continue
 		}
+
 		restore = append(restore, f)
 	}
+
 	if len(restore) > 0 {
-		if _, err := s.git(nulJoin(restore), "restore", "--source="+target.Commit, "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+		args := []string{"restore", "--source=" + target.Commit, "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"}
+		if _, err := s.git(nulJoin(restore), args...); err != nil {
 			return "", err
 		}
 	}
@@ -179,10 +218,12 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	if err != nil {
 		return "", err
 	}
+
 	tracked, err := s.trackedFiles()
 	if err != nil {
 		return "", err
 	}
+
 	for name, body := range home {
 		if current, ok := s.currentEntry(name); slices.Contains(tracked, name) && (!ok || !bytes.Equal(current, body)) {
 			if err := s.writeEntry(name, body, false); err != nil {
@@ -190,10 +231,12 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 			}
 		}
 	}
+
 	extra, err := s.untracked()
 	if err != nil {
 		return "", err
 	}
+
 	for _, f := range extra {
 		if !slices.Contains(keep, f) {
 			if err := s.removeEntry(f); err != nil {
@@ -206,12 +249,15 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	if err != nil {
 		return "", err
 	}
+
 	var ids []string
+
 	for _, c := range pending {
-		if c.Kind == "config" {
+		if c.Kind == kindConfig {
 			ids = append(ids, c.ID)
 		}
 	}
+
 	if len(ids) > 0 {
 		if _, err := s.Record(ids, "Restore checkpoint: "+target.Name, by); err != nil {
 			return "", err
@@ -222,17 +268,21 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	if err != nil {
 		return "", err
 	}
+
 	nowUnits, err := s.ListUnits()
 	if err != nil {
 		return "", err
 	}
+
 	var manual []string
 	// setChanges(now→checkpoint) lists what to install or enable to get back.
-	for _, c := range append(setChanges("package", nowPkgs, target.Packages), setChanges("unit", nowUnits, target.Units)...) {
+	for _, c := range append(setChanges(kindPackage, nowPkgs, target.Packages), setChanges(kindUnit, nowUnits, target.Units)...) {
 		manual = append(manual, redo(c))
 	}
+
 	if len(manual) > 0 {
 		hint = "To match the checkpoint, run as root:\n  " + strings.Join(manual, "\n  ")
 	}
+
 	return hint, nil
 }

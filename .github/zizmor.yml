@@ -1,0 +1,6 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        dDan4a/*: ref-pin
+        "*": hash-pin

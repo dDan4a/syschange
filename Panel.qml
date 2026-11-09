@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import qs.Commons
@@ -6,16 +8,16 @@ import qs.Ui
 Panel {
   id: root
   moduleName: "dan4a.syschange"
-  ipcTarget: moduleName
+  ipcTarget: root.moduleName
   manageIpc: false
 
   property var anchorItem: null
   property var hostWidget: null
   property var source: null
   readonly property var barIdentity: hostWidget || root
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color foreground: root.bar ? root.bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.4)
-  readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+  readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
 
   readonly property var groups: source ? source.pending : []
   readonly property var history: source ? source.history : []
@@ -24,6 +26,8 @@ Panel {
   property int selected: 0
   property string editingKey: ""   // group being described
   property real now: Date.now()    // what ago() counts from: the lists keep their delegates while their data stays the same
+  readonly property string keyHelp: "↑↓ select · Enter describe · a AI · A AI all · s keep · o/v diff · / search · "
+                                    + "c checkpoint · r refresh, clear error"
   property string armed: ""        // destructive action waiting for a second click: "revert:<id>", "ignore:<group>", "undo:<entry>"
 
   function open() {
@@ -177,11 +181,34 @@ Panel {
   }
 
   // Who wrote the entry, or else which agents made its changes.
+  function heroMeta() {
+    if (!root.source)
+      return ""
+    if (root.source.missing)
+      return "Not installed"
+    if (!root.source.initialized)
+      return "Not tracking yet"
+    if (root.source.count === 0)
+      return "Everything is recorded"
+    return root.source.count + " new" + (root.source.overdue ? ", waiting " + root.source.pendingDays + " days" : "")
+  }
+  function cliNotice() {
+    if (!root.source)
+      return ""
+    if (!root.source.missing)
+      return "syschange " + root.source.version + " is older than this widget expects (" + root.source.cliVersion + ")."
+    const install = "This widget needs the syschange command. Install builds it from github.com/dDan4a/syschange (v" + root.source.cliVersion
+          + ") into ~/.local/bin with Go. No Go yet? mise fetches one just for the build. Then tracking starts."
+    const binary = root.source.binary
+    if (binary.indexOf("/") >= 0 && binary.indexOf("/.local/bin/") < 0)
+      return install + " Your widget settings point at " + binary + ": clear that setting to use the installed one."
+    return install
+  }
   function entryAuthor(e) {
     if (e.by)
       return e.by
     var seen = []
-    for (var i = 0; i < e.changes.length; i++)
+    for (let i = 0; i < e.changes.length; i++)
       if (e.changes[i].by && seen.indexOf(e.changes[i].by) < 0)
         seen.push(e.changes[i].by)
     return seen.join(", ")
@@ -255,8 +282,8 @@ Panel {
     interval: 4000
     onTriggered: root.armed = ""
   }
-  onOpenedChanged: if (opened)
-                     now = Date.now()
+  onOpenedChanged: if (root.opened)
+                     root.now = Date.now()
   Timer {
     interval: 60000
     running: root.opened
@@ -335,12 +362,7 @@ Panel {
           PanelHero {
             width: parent.width
             title: "System changes"
-            meta: !root.source ? "" : root.source.missing ? "Not installed" : !root.source.initialized ? "Not tracking yet" : root.source.count === 0
-                                                                                                         ? "Everything is recorded" :
-                                                                                                           root.source.count + " new" + (
-                                                                                                             root.source.overdue ? ", waiting "
-                                                                                                                                   + root.source.pendingDays
-                                                                                                                                   + " days" : "")
+            meta: root.heroMeta()
             detail: root.source && root.source.error !== "" ? "Error" : ""
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -386,16 +408,7 @@ Panel {
             spacing: Style.space(8)
             Text {
               width: parent.width
-              text: root.source && root.source.missing
-                    ? "This widget needs the syschange command. Install builds it from github.com/dDan4a/syschange (v" + root.source.cliVersion
-                      + ") into ~/.local/bin with Go. No Go yet? mise fetches one just for the build. Then tracking starts." + (
-                        root.source.binary.indexOf("/") >= 0 && root.source.binary.indexOf("/.local/bin/") < 0 ? " Your widget settings point at "
-                                                                                                                 + root.source.binary
-                                                                                                                 + ": clear that setting to use the installed one." :
-                                                                                                                 "") : "syschange " + (root.source
-                                                                                                                                       ? root.source.version :
-                                                                                                                                         "") + " is older than this widget expects ("
-                      + (root.source ? root.source.cliVersion : "") + ")."
+              text: root.cliNotice()
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
@@ -416,7 +429,8 @@ Panel {
             spacing: Style.space(8)
             Text {
               width: parent.width
-              text: "Keep a history of your config files in ~/.config, installed packages and enabled services. Describe each change in one line, see the diff and undo it."
+              text: "Keep a history of your config files in ~/.config, installed packages and enabled services. "
+                    + "Describe each change in one line, see the diff and undo it."
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
@@ -593,7 +607,7 @@ Panel {
                       anchors.right: undo.left
                       anchors.verticalCenter: parent.verticalCenter
                       visible: changeItem.modelData.kind === "config"
-                      width: visible ? implicitWidth : 0
+                      width: ignoreFile.visible ? ignoreFile.implicitWidth : 0
                       iconText: "󰈉" // nf-md-eye_off
                       tooltipText: "Stop tracking this file"
                       foreground: root.dim
@@ -960,8 +974,7 @@ Panel {
 
           Text {
             width: parent.width
-            text: root.editingKey !== "" ? "Enter save · Esc cancel" :
-                                           "↑↓ select · Enter describe · a AI · A AI all · s keep · o/v diff · / search · c checkpoint · r refresh, clear error"
+            text: root.editingKey !== "" ? "Enter save · Esc cancel" : root.keyHelp
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

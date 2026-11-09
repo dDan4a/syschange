@@ -51,8 +51,8 @@ FocusScope {
         root.text = ""
       else if (ctrl)
         root.text = root.text.replace(/\S*\s*$/, "")
-      // the last word
       else
+        // the last word
         root.text = root.text.slice(0, -1)
       root.selected = false
       event.accepted = true

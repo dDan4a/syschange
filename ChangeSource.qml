@@ -66,8 +66,8 @@ Item {
   // newer("0.2.0", "0.1.3") === true
   function newer(a, b) {
     var x = a.split("."), y = b.split(".")
-    for (var i = 0; i < 3; i++) {
-      var d = (parseInt(x[i]) || 0) - (parseInt(y[i]) || 0)
+    for (let i = 0; i < 3; i++) {
+      const d = (parseInt(x[i]) || 0) - (parseInt(y[i]) || 0)
       if (d !== 0)
         return d > 0
     }
@@ -197,10 +197,10 @@ Item {
     var header = false
     // before a file's first hunk; inside hunks "--- x" is a removed line "-- x"
     var lines = String(text || "").split("\n")
-    for (var i = 0; i < lines.length; i++) {
-      var l = lines[i]
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i]
       if (l.indexOf("diff --git ") === 0) {
-        var m = / b\/(.*)$/.exec(l)
+        const m = / b\/(.*)$/.exec(l)
         out.push({
                    kind: "file",
                    text: m ? m[1] : l
@@ -239,8 +239,8 @@ Item {
   }
 
   function openDiff(key) {
-    Quickshell.execDetached(["setsid", "uwsm-app", "--", "xdg-terminal-exec", "--app-id=org.omarchy.terminal", "--title=System changes", "-e", "sh", "-c",
-                             '"$0" diff --color "$1" | less -R', binary, key])
+    const terminal = ["setsid", "uwsm-app", "--", "xdg-terminal-exec", "--app-id=org.omarchy.terminal", "--title=System changes"]
+    Quickshell.execDetached(terminal.concat(["-e", "sh", "-c", '"$0" diff --color "$1" | less -R', binary, key]))
   }
 
   function message(text) {
@@ -314,9 +314,9 @@ Item {
         return
       }
       try {
-        var changed = statusOut.text !== root.lastStatus
+        const changed = statusOut.text !== root.lastStatus
         root.lastStatus = statusOut.text
-        var s = JSON.parse(statusOut.text)
+        const s = JSON.parse(statusOut.text)
         root.initialized = s.initialized
         root.pending = s.pending || []
         root.history = s.history || []
@@ -331,7 +331,7 @@ Item {
         root.pendingDays = s.oldestPending ? Math.floor((Date.now() - Date.parse(s.oldestPending)) / 86400000) : 0
         // The shown diff follows the files: reload it when anything changed.
         if (changed && root.diffKey !== "") {
-          var still = root.pending.some(function (g) {
+          const still = root.pending.some(function (g) {
             return g.key === root.diffKey
           })
           root.showDiff(still ? root.diffKey : "")
@@ -454,7 +454,7 @@ Item {
       if (exitCode !== 0)
         root.failure(actionErr.text || actionOut.text)
       else {
-        var out = String(actionOut.text || "").trim()
+        const out = String(actionOut.text || "").trim()
         if (/sudo |systemctl /.test(out))
           root.notice = out
       }

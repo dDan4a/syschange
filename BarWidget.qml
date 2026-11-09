@@ -13,7 +13,7 @@ BarWidget {
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
 
   // One service instance shared by the widgets on every monitor.
-  readonly property var source: bar && bar.shell ? bar.shell.serviceFor("dan4a.syschange") : null
+  readonly property var source: root.bar && root.bar.shell ? root.bar.shell.serviceFor("dan4a.syschange") : null
   readonly property int count: source ? source.count : 0
   readonly property string error: source ? source.error : ""
 
@@ -24,6 +24,17 @@ BarWidget {
   function close() {
     if (panelLoader.item)
       panelLoader.item.close()
+  }
+  function tooltip() {
+    if (root.source && root.source.missing)
+      return "System changes: click to install"
+    if (root.error !== "")
+      return "System changes: " + root.error
+    if (root.count === 0)
+      return "System changes: everything is recorded"
+    if (root.source && root.source.overdue)
+      return "System changes: " + root.count + " new, waiting " + root.source.pendingDays + " days to be described"
+    return "System changes: " + root.count + " new, click to describe or undo"
   }
   function togglePanel() {
     if (panelLoader.item)
@@ -49,11 +60,11 @@ BarWidget {
   function configureSource() {
     if (!source)
       return
-    source.binary = String(setting("binary", "syschange")).replace(/^~(?=\/)/, Quickshell.env("HOME"))
-    source.intervalSec = Number(setting("refreshIntervalSec", 30))
-    source.remindDays = Number(setting("remindDays", 3))
-    source.weeklyDigest = setting("weeklyDigest", true) !== false
-    source.exportPath = String(setting("exportPath", "~/Documents/System changes.md")).replace(/^~(?=\/)/, Quickshell.env("HOME"))
+    source.binary = String(root.setting("binary", "syschange")).replace(/^~(?=\/)/, Quickshell.env("HOME"))
+    source.intervalSec = Number(root.setting("refreshIntervalSec", 30))
+    source.remindDays = Number(root.setting("remindDays", 3))
+    source.weeklyDigest = root.setting("weeklyDigest", true) !== false
+    source.exportPath = String(root.setting("exportPath", "~/Documents/System changes.md")).replace(/^~(?=\/)/, Quickshell.env("HOME"))
   }
 
   implicitWidth: button.implicitWidth
@@ -90,16 +101,7 @@ BarWidget {
                                                                                                                             ? root.bar.barForeground :
                                                                                                                               Color.foreground)
     dimmed: root.count === 0 && root.error === ""
-    tooltipText: root.source && root.source.missing ? "System changes: click to install" : root.error !== "" ? "System changes: " + root.error :
-                                                                                                               root.count === 0
-                                                                                                               ? "System changes: everything is recorded" :
-                                                                                                                 root.source && root.source.overdue
-                                                                                                                 ? "System changes: " + root.count
-                                                                                                                   + " new, waiting "
-                                                                                                                   + root.source.pendingDays
-                                                                                                                   + " days to be described" :
-                                                                                                                   "System changes: " + root.count
-                                                                                                                   + " new, click to describe or undo"
+    tooltipText: root.tooltip()
     onPressed: root.togglePanel()
   }
 }

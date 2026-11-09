@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    uses: dDan4a/ci/.github/workflows/go-lint.yml@v1
+  test:
+    uses: dDan4a/ci/.github/workflows/go-test.yml@v1
+  vulncheck:
+    uses: dDan4a/ci/.github/workflows/go-vulncheck.yml@v1
+  tidy:
+    uses: dDan4a/ci/.github/workflows/go-mod-tidy.yml@v1
+  qml:
+    uses: dDan4a/ci/.github/workflows/qml-lint.yml@v1
+  actionlint:
+    uses: dDan4a/ci/.github/workflows/actionlint.yml@v1
+  zizmor:
+    uses: dDan4a/ci/.github/workflows/zizmor.yml@v1
+  gitleaks:
+    uses: dDan4a/ci/.github/workflows/gitleaks.yml@v1
+  typos:
+    uses: dDan4a/ci/.github/workflows/typos.yml@v1
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: manifest is valid JSON
+        run: jq -e '.id and .entryPoints.service and .entryPoints.barWidget' manifest.json

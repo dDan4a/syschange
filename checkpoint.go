@@ -168,25 +168,46 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 		return "", err
 	}
 
-	savedTree, err := s.git(nil, "ls-tree", "-r", "--name-only", "-z", before.Commit)
+	keep, err := s.restoreConfig(target.Commit, before.Commit)
 	if err != nil {
 		return "", err
+	}
+
+	if err := s.restoreHome(target.Commit); err != nil {
+		return "", err
+	}
+
+	if err := s.removeUntrackedExcept(keep); err != nil {
+		return "", err
+	}
+
+	if err := s.recordConfig("Restore checkpoint: "+target.Name, by); err != nil {
+		return "", err
+	}
+
+	return s.itemsHint(target)
+}
+
+// Files of the checkpoint come back; files it did not have go away. The
+// paths are listed, as "." would also bring "~/" files into the config dir.
+func (s *Store) restoreConfig(target, before string) (keep []string, err error) {
+	savedTree, err := s.git(nil, "ls-tree", "-r", "--name-only", "-z", before)
+	if err != nil {
+		return nil, err
 	}
 
 	saved := splitNul(savedTree)
 
-	// Files of the checkpoint come back; files it did not have go away. The
-	// paths are listed, as "." would also bring "~/" files into the config dir.
-	inTree, err := s.git(nil, "ls-tree", "-r", "--name-only", "-z", target.Commit)
+	inTree, err := s.git(nil, "ls-tree", "-r", "--name-only", "-z", target)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	keep := splitNul(inTree)
+	keep = splitNul(inTree)
 
 	inIndex, err := s.git(nil, "ls-files", "-z")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	var restore []string
@@ -207,47 +228,60 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 	}
 
 	if len(restore) > 0 {
-		args := []string{"restore", "--source=" + target.Commit, "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"}
+		args := []string{"restore", "--source=" + target, "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"}
 		if _, err := s.git(nulJoin(restore), args...); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
-	// Tracked files under $HOME come back too; one the checkpoint did not have
-	// stays, as it may predate tracking it.
-	home, err := s.recorded(target.Commit)
+
+	return keep, nil
+}
+
+// Tracked files under $HOME come back too; one the checkpoint did not have
+// stays, as it may predate tracking it.
+func (s *Store) restoreHome(target string) error {
+	home, err := s.recorded(target)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	tracked, err := s.trackedFiles()
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	for name, body := range home {
 		if current, ok := s.currentEntry(name); slices.Contains(tracked, name) && (!ok || !bytes.Equal(current, body)) {
 			if err := s.writeEntry(name, body, false); err != nil {
-				return "", err
+				return err
 			}
 		}
 	}
 
+	return nil
+}
+
+func (s *Store) removeUntrackedExcept(keep []string) error {
 	extra, err := s.untracked()
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	for _, f := range extra {
 		if !slices.Contains(keep, f) {
 			if err := s.removeEntry(f); err != nil {
-				return "", err
+				return err
 			}
 		}
 	}
 
+	return nil
+}
+
+func (s *Store) recordConfig(note, by string) error {
 	pending, err := s.Pending()
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	var ids []string
@@ -258,12 +292,16 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 		}
 	}
 
-	if len(ids) > 0 {
-		if _, err := s.Record(ids, "Restore checkpoint: "+target.Name, by); err != nil {
-			return "", err
-		}
+	if len(ids) == 0 {
+		return nil
 	}
 
+	_, err = s.Record(ids, note, by)
+
+	return err
+}
+
+func (s *Store) itemsHint(target Checkpoint) (string, error) {
 	nowPkgs, err := s.ListPackages()
 	if err != nil {
 		return "", err
@@ -280,9 +318,9 @@ func (s *Store) Restore(name, by string) (hint string, err error) {
 		manual = append(manual, redo(c))
 	}
 
-	if len(manual) > 0 {
-		hint = "To match the checkpoint, run as root:\n  " + strings.Join(manual, "\n  ")
+	if len(manual) == 0 {
+		return "", nil
 	}
 
-	return hint, nil
+	return "To match the checkpoint, run as root:\n  " + strings.Join(manual, "\n  "), nil
 }

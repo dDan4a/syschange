@@ -115,117 +115,130 @@ func (s *Store) PlanApply(source string) (*Plan, error) {
 	}
 
 	p := &Plan{Source: source, gitDir: dir}
-	if _, err := gitAt(dir, "rev-parse", "--verify", "--quiet", backupConfigBranch); err != nil {
-		p.Cleanup()
-		return nil, errors.New(source + " is not a syschange backup (no config branch)")
-	}
-
-	// Config files: what changed there since tracking started.
-	root, err := gitAt(dir, "rev-list", "--max-parents=0", backupConfigBranch)
-	if err != nil {
+	if err := s.fillPlan(p); err != nil {
 		p.Cleanup()
 		return nil, err
 	}
 
-	diff, err := gitAt(dir, "diff", "--name-status", "--no-renames", "-z", strings.Fields(string(root))[0], backupConfigBranch)
+	return p, nil
+}
+
+func (s *Store) fillPlan(p *Plan) error {
+	if _, err := gitAt(p.gitDir, "rev-parse", "--verify", "--quiet", backupConfigBranch); err != nil {
+		return errors.New(p.Source + " is not a syschange backup (no config branch)")
+	}
+
+	if err := s.planFiles(p); err != nil {
+		return err
+	}
+
+	if err := s.planPackages(p); err != nil {
+		return err
+	}
+
+	return s.planUnits(p)
+}
+
+func (s *Store) planFiles(p *Plan) error {
+	root, err := gitAt(p.gitDir, "rev-list", "--max-parents=0", backupConfigBranch)
 	if err != nil {
-		p.Cleanup()
-		return nil, err
+		return err
+	}
+
+	diff, err := gitAt(p.gitDir, "diff", "--name-status", "--no-renames", "-z", strings.Fields(string(root))[0], backupConfigBranch)
+	if err != nil {
+		return err
 	}
 
 	fields := splitNul(diff)
 	for i := 0; i+1 < len(fields); i += 2 {
-		status, path := fields[i], fields[i+1]
-		if _, _, err := s.rootFor(path); err != nil {
-			p.Cleanup()
-			return nil, fmt.Errorf("the backup has an unsafe path %q: refusing it (%w)", path, err)
+		if err := s.planFile(p, fields[i], fields[i+1]); err != nil {
+			return err
 		}
-
-		local := s.realPath(path)
-
-		current, exists := s.currentEntry(path)
-		if status == "D" {
-			// Untracking there drops a home file from the history too: never delete it here.
-			if exists && !isHome(path) {
-				if !isLink(local) && !s.trackable(path) {
-					p.Cleanup()
-					return nil, fmt.Errorf("~/.config/%s would be deleted, but it %s", path, cannotKeep)
-				}
-
-				p.Files = append(p.Files, FileAction{Path: path, Action: actionDelete})
-			}
-
-			continue
-		}
-
-		body, err := gitAt(dir, "show", backupConfigBranch+":"+path)
-		if err != nil {
-			p.Cleanup()
-			return nil, err
-		}
-
-		mode, err := gitAt(dir, "ls-tree", backupConfigBranch, "--", path)
-		if err != nil {
-			p.Cleanup()
-			return nil, err
-		}
-
-		fa := FileAction{Path: path, Action: actionAdd, body: body, link: strings.HasPrefix(string(mode), "120000")}
-		if isHome(path) && (fa.link || !plainText(body)) {
-			p.Cleanup()
-			return nil, fmt.Errorf("the backup has %s as a symlink or with a secret: refusing it", path)
-		}
-
-		if isHome(path) {
-			_, ok, there := s.homeContent(path)
-
-			exists = exists || there // a file readHome refuses (a symlink, say) is still there
-			if there && !ok && !bytes.Equal(current, body) {
-				p.Cleanup()
-				return nil, fmt.Errorf("%s would be overwritten, but it %s", path, cannotKeep)
-			}
-		}
-
-		if exists {
-			if bytes.Equal(current, body) {
-				p.Skipped++
-				continue
-			}
-
-			if !isHome(path) && !isLink(local) && !s.trackable(path) {
-				p.Cleanup()
-				return nil, fmt.Errorf("~/.config/%s would be overwritten, but it %s", path, cannotKeep)
-			}
-
-			fa.Action = actionOverwrite
-		}
-
-		p.Files = append(p.Files, fa)
 	}
 
-	// Packages and services added there, and still missing here.
+	return nil
+}
+
+func (s *Store) planFile(p *Plan, status, path string) error {
+	if _, _, err := s.rootFor(path); err != nil {
+		return fmt.Errorf("the backup has an unsafe path %q: refusing it (%w)", path, err)
+	}
+
+	current, exists := s.currentEntry(path)
+	if status == "D" {
+		return s.planDelete(p, path, exists)
+	}
+
+	body, err := gitAt(p.gitDir, "show", backupConfigBranch+":"+path)
+	if err != nil {
+		return err
+	}
+
+	mode, err := gitAt(p.gitDir, "ls-tree", backupConfigBranch, "--", path)
+	if err != nil {
+		return err
+	}
+
+	fa := FileAction{Path: path, Action: actionAdd, body: body, link: strings.HasPrefix(string(mode), "120000")}
+	if isHome(path) {
+		if fa.link || !plainText(body) {
+			return fmt.Errorf("the backup has %s as a symlink or with a secret: refusing it", path)
+		}
+
+		_, ok, there := s.homeContent(path)
+
+		exists = exists || there // a file readHome refuses (a symlink, say) is still there
+		if there && !ok && !bytes.Equal(current, body) {
+			return fmt.Errorf("%s would be overwritten, but it %s", path, cannotKeep)
+		}
+	}
+
+	if exists {
+		if bytes.Equal(current, body) {
+			p.Skipped++
+			return nil
+		}
+
+		if !isHome(path) && !isLink(s.realPath(path)) && !s.trackable(path) {
+			return fmt.Errorf("~/.config/%s would be overwritten, but it %s", path, cannotKeep)
+		}
+
+		fa.Action = actionOverwrite
+	}
+
+	p.Files = append(p.Files, fa)
+
+	return nil
+}
+
+// Untracking there drops a home file from the history too: never delete it here.
+func (s *Store) planDelete(p *Plan, path string, exists bool) error {
+	if !exists || isHome(path) {
+		return nil
+	}
+
+	if !isLink(s.realPath(path)) && !s.trackable(path) {
+		return fmt.Errorf("~/.config/%s would be deleted, but it %s", path, cannotKeep)
+	}
+
+	p.Files = append(p.Files, FileAction{Path: path, Action: actionDelete})
+
+	return nil
+}
+
+func (s *Store) planPackages(p *Plan) error {
 	have, err := s.ListPackages()
 	if err != nil {
-		p.Cleanup()
-		return nil, err
+		return err
 	}
 
-	for _, list := range []string{"packages.txt", "packages.init.txt", "packages.aur.txt", "units.txt", "units.init.txt"} {
-		valid := packageName
-		if strings.HasPrefix(list, "units") {
-			valid = unitLine
-		}
-
-		for _, name := range stateLines(dir, list) {
-			if !valid.MatchString(name) {
-				p.Cleanup()
-				return nil, fmt.Errorf("the backup lists an invalid name %q in %s: refusing it", name, list)
-			}
-		}
+	if err := checkStateNames(p.gitDir); err != nil {
+		return err
 	}
 
-	aur := stateLines(dir, "packages.aur.txt")
-	for _, c := range setChanges(kindPackage, stateLines(dir, packagesList+".init.txt"), stateLines(dir, packagesList+".txt")) {
+	aur := stateLines(p.gitDir, "packages.aur.txt")
+	for _, c := range setChanges(kindPackage, stateLines(p.gitDir, packagesList+".init.txt"), stateLines(p.gitDir, packagesList+".txt")) {
 		switch {
 		case c.Op == opRemoved:
 			p.Removals = append(p.Removals, c.Name)
@@ -237,19 +250,39 @@ func (s *Store) PlanApply(source string) (*Plan, error) {
 		}
 	}
 
-	enabled, err := s.ListUnits()
-	if err != nil {
-		p.Cleanup()
-		return nil, err
+	return nil
+}
+
+func checkStateNames(dir string) error {
+	for _, list := range []string{"packages.txt", "packages.init.txt", "packages.aur.txt", "units.txt", "units.init.txt"} {
+		valid := packageName
+		if strings.HasPrefix(list, "units") {
+			valid = unitLine
+		}
+
+		for _, name := range stateLines(dir, list) {
+			if !valid.MatchString(name) {
+				return fmt.Errorf("the backup lists an invalid name %q in %s: refusing it", name, list)
+			}
+		}
 	}
 
-	for _, c := range setChanges(kindUnit, stateLines(dir, unitsList+".init.txt"), stateLines(dir, unitsList+".txt")) {
+	return nil
+}
+
+func (s *Store) planUnits(p *Plan) error {
+	enabled, err := s.ListUnits()
+	if err != nil {
+		return err
+	}
+
+	for _, c := range setChanges(kindUnit, stateLines(p.gitDir, unitsList+".init.txt"), stateLines(p.gitDir, unitsList+".txt")) {
 		if c.Op == opAdded && !slices.Contains(enabled, c.Name) {
 			p.Units = append(p.Units, c.Name)
 		}
 	}
 
-	return p, nil
+	return nil
 }
 
 func (p *Plan) Cleanup() {

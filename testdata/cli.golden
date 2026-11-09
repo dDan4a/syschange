@@ -1,0 +1,404 @@
+$ syschange 
+syschange keeps a history of changes to your system setup.
+
+Usage:
+  syschange init                       start tracking (~/.config, packages, services);
+                                       with Omarchy, its updates and theme changes record themselves
+  syschange status [--json]            show changes not recorded yet
+  syschange note [--by NAME] TEXT [ID...]
+                                       record changes with a one-line reason
+  syschange skip [ID...]               record changes without a reason
+  syschange suggest [--agent NAME] [ID...]
+                                       ask an AI agent for a one-line description
+  syschange suggest --all [--send] [--agent NAME]
+                                       describe every app's changes with AI and record them;
+                                       --send shows the result as a notification
+  syschange diff [--color] [ID...]     show what changed in config files
+  syschange revert ID...               undo config changes
+  syschange ignore PATH                never track PATH (a gitignore pattern)
+  syschange track [FILE...]            also track these files under your home folder (~/.gitconfig),
+                                       or list the tracked ones
+  syschange untrack FILE...            stop tracking them
+  syschange log [--grep TEXT] [--json] show the history, or the entries that mention TEXT
+                                       in their description, files, packages or diff
+  syschange checkpoint [NAME]          save the whole setup now, unrecorded edits included
+  syschange checkpoints                list them
+  syschange restore NAME               bring config files back to a checkpoint
+  syschange undo ENTRY [PATH...]       undo a recorded entry (its commit, or time from status --json),
+                                       or only these files of it
+  syschange remote [set URL | off]     back the history up to a private git repository
+  syschange push                       push now (it happens by itself after every change)
+  syschange apply [--yes] BACKUP       bring a backed-up setup to this machine: files, packages, services
+  syschange digest [--days N]          sum up the last N days (default 7)
+  syschange notify [--send] [--remind-days N] [--no-digest]
+                                       notifications due now, shown (--send) or as JSON: a reminder when changes
+                                       wait unrecorded N days (default 3, 0 off), once a day,
+                                       and last week's digest, once a week
+  syschange export [--to FILE]         history and setup steps as Markdown
+  syschange export --auto FILE|off     keep FILE updated after every record
+  syschange agents [install [NAME...]|remove]
+                                       connect Claude Code, Codex, Gemini CLI, Grok: skill + hooks
+  syschange hook AGENT [start]         the hooks themselves (read stdin)
+  syschange version                    print the version
+
+ID is a file path inside ~/.config (hypr/bindings.conf), an app directory (hypr),
+a tracked file (~/.gitconfig), a package or unit name, or a group: packages, services.
+No ID means all changes.
+
+$ syschange --help
+syschange keeps a history of changes to your system setup.
+
+Usage:
+  syschange init                       start tracking (~/.config, packages, services);
+                                       with Omarchy, its updates and theme changes record themselves
+  syschange status [--json]            show changes not recorded yet
+  syschange note [--by NAME] TEXT [ID...]
+                                       record changes with a one-line reason
+  syschange skip [ID...]               record changes without a reason
+  syschange suggest [--agent NAME] [ID...]
+                                       ask an AI agent for a one-line description
+  syschange suggest --all [--send] [--agent NAME]
+                                       describe every app's changes with AI and record them;
+                                       --send shows the result as a notification
+  syschange diff [--color] [ID...]     show what changed in config files
+  syschange revert ID...               undo config changes
+  syschange ignore PATH                never track PATH (a gitignore pattern)
+  syschange track [FILE...]            also track these files under your home folder (~/.gitconfig),
+                                       or list the tracked ones
+  syschange untrack FILE...            stop tracking them
+  syschange log [--grep TEXT] [--json] show the history, or the entries that mention TEXT
+                                       in their description, files, packages or diff
+  syschange checkpoint [NAME]          save the whole setup now, unrecorded edits included
+  syschange checkpoints                list them
+  syschange restore NAME               bring config files back to a checkpoint
+  syschange undo ENTRY [PATH...]       undo a recorded entry (its commit, or time from status --json),
+                                       or only these files of it
+  syschange remote [set URL | off]     back the history up to a private git repository
+  syschange push                       push now (it happens by itself after every change)
+  syschange apply [--yes] BACKUP       bring a backed-up setup to this machine: files, packages, services
+  syschange digest [--days N]          sum up the last N days (default 7)
+  syschange notify [--send] [--remind-days N] [--no-digest]
+                                       notifications due now, shown (--send) or as JSON: a reminder when changes
+                                       wait unrecorded N days (default 3, 0 off), once a day,
+                                       and last week's digest, once a week
+  syschange export [--to FILE]         history and setup steps as Markdown
+  syschange export --auto FILE|off     keep FILE updated after every record
+  syschange agents [install [NAME...]|remove]
+                                       connect Claude Code, Codex, Gemini CLI, Grok: skill + hooks
+  syschange hook AGENT [start]         the hooks themselves (read stdin)
+  syschange version                    print the version
+
+ID is a file path inside ~/.config (hypr/bindings.conf), an app directory (hypr),
+a tracked file (~/.gitconfig), a package or unit name, or a group: packages, services.
+No ID means all changes.
+
+$ syschange version
+0.3.1
+
+$ syschange nope
+error: unknown command "nope", see syschange help
+
+$ syschange status --bogus
+error: flag provided but not defined: -bogus
+
+$ syschange init
+Tracking <tmp>/001/config. History lives in <tmp>/001/state.
+
+$ syschange status
+Nothing new. Everything is recorded.
+
+$ syschange status --json
+{"initialized":true,"count":0,"pending":null,"history":null,"configDir":"<tmp>/001/config","agents":[],"checkpoints":[],"autoExport":"","version":"0.3.1"}
+
+$ syschange status
+Hyprland  [hypr]
+  ~ Key bindings  +1 -1
+Kitty  [kitty]
+  + kitty.conf  +1 -0
+Waybar  [waybar]
+  + config  +1 -0
+
+Record with: syschange note "why" [ID...]   undo with: syschange revert ID...
+
+$ syschange status --json
+{"initialized":true,"count":3,"pending":[{"key":"hypr","title":"Hyprland","changes":[{"id":"hypr/bindings.conf","kind":"config","op":"modified","name":"hypr/bindings.conf","label":"Key bindings","added":1,"removed":1}]},{"key":"kitty","title":"Kitty","changes":[{"id":"kitty/kitty.conf","kind":"config","op":"added","name":"kitty/kitty.conf","label":"kitty.conf","added":1}]},{"key":"waybar","title":"Waybar","changes":[{"id":"waybar/config","kind":"config","op":"added","name":"waybar/config","label":"config","added":1}]}],"history":null,"configDir":"<tmp>/001/config","agents":[],"checkpoints":[],"autoExport":"","version":"0.3.1","oldestPending":"<time>"}
+
+$ syschange diff hypr
+diff --git a/hypr/bindings.conf b/hypr/bindings.conf
+index <commit>..<commit> 100644
+--- a/hypr/bindings.conf
++++ b/hypr/bindings.conf
+@@ -1 +1 @@
+-bind = SUPER, Q, killactive
++bind = SUPER, R, exec, voxtype
+
+$ syschange diff --color kitty
+[1mdiff --git a/kitty/kitty.conf b/kitty/kitty.conf[m
+[1mnew file mode 100644[m
+[1mindex <commit>..<commit>[m
+[1m--- /dev/null[m
+[1m+++ b/kitty/kitty.conf[m
+[36m@@ -0,0 +1 @@[m
+[32m+[m[32mfont_size 12[m
+
+$ syschange suggest --agent grok hypr
+AI line
+
+$ syschange suggest --agent opencode
+error: describing with "opencode" is not supported; use claude, codex, gemini or grok (syschange suggest --agent NAME)
+
+$ syschange note
+error: note needs a text: syschange note "why" [ID...]
+
+$ syschange note why nothing-here
+error: nothing to record: no pending change matches
+
+$ syschange note --by codex Voice typing hypr
+Recorded 1 change(s).
+
+$ syschange skip kitty
+Recorded 1 change(s) without a description.
+
+$ syschange track
+
+$ syschange track ~/.gitconfig
+
+$ syschange track
+~/.gitconfig
+
+$ syschange status
+Waybar  [waybar]
+  + config  +1 -0
+
+Record with: syschange note "why" [ID...]   undo with: syschange revert ID...
+
+$ syschange diff ~/.gitconfig
+diff --git a/~/.gitconfig b/~/.gitconfig
+index <commit>..<commit> 100644
+--- a/~/.gitconfig
++++ b/~/.gitconfig
+@@ -1 +1,2 @@
+ [user]
++name = me
+
+$ syschange note Git name ~/.gitconfig
+Recorded 1 change(s).
+
+$ syschange log
+<time>  <commit>  Git name
+    ~ ~/.gitconfig
+<time>  <commit>  (no description)
+    + kitty/kitty.conf
+<time>  <commit>  Voice typing  [codex]
+    ~ hypr/bindings.conf
+
+$ syschange log --grep voice
+<time>  <commit>  Voice typing  [codex]
+    ~ hypr/bindings.conf
+
+$ syschange log --json --grep nothing like it
+[]
+
+$ syschange log --json
+[{"time":"<time>","note":"Git name","commit":"<commit>","title":"~/.gitconfig","changes":[{"id":"~/.gitconfig","kind":"config","op":"modified","name":"~/.gitconfig","label":".gitconfig","added":1}]},{"time":"<time>","commit":"<commit>","title":"Kitty","changes":[{"id":"kitty/kitty.conf","kind":"config","op":"added","name":"kitty/kitty.conf","label":"kitty.conf","added":1}]},{"time":"<time>","note":"Voice typing","by":"codex","commit":"<commit>","title":"Hyprland","changes":[{"id":"hypr/bindings.conf","kind":"config","op":"modified","name":"hypr/bindings.conf","label":"Key bindings","added":1,"removed":1}]}]
+
+$ syschange undo
+error: undo takes a history entry: its time (see status --json) or commit
+
+$ syschange undo <commit>
+error: no history entry "<commit>"
+
+$ syschange undo <commit>
+Undid 1 config change(s).
+
+$ syschange log
+<time>  <commit>  Undo: Git name
+    ~ ~/.gitconfig
+<time>  <commit>  Git name  (undone)
+    ~ ~/.gitconfig
+<time>  <commit>  (no description)
+    + kitty/kitty.conf
+<time>  <commit>  Voice typing  [codex]
+    ~ hypr/bindings.conf
+
+$ syschange digest
+4 entries, 4 changes.
+Config: ~/.gitconfig (2), Hyprland (1), Kitty (1).
+By: codex 1, you 3.
+1 without a description.
+
+$ syschange digest --days 3
+4 entries, 4 changes.
+Config: ~/.gitconfig (2), Hyprland (1), Kitty (1).
+By: codex 1, you 3.
+1 without a description.
+
+$ syschange notify --no-digest --remind-days 0
+[]
+
+$ syschange notify --send
+
+$ syschange revert
+error: revert needs at least one ID
+
+$ syschange revert waybar
+
+$ syschange suggest --all --send --agent grok
+Mako: AI line
+Waybar: failed: grok failed: exit status 1 
+Described 1 of 2.
+
+$ syschange suggest --all --agent grok
+Waybar: failed: grok failed: exit status 1 
+Described 0 of 1.
+error: no change could be described:
+Waybar: failed: grok failed: exit status 1
+
+$ syschange ignore
+error: ignore takes one path
+
+$ syschange ignore waybar/
+
+$ syschange status
+Nothing new. Everything is recorded.
+
+$ syschange checkpoint before anim
+Saved checkpoint "before anim".
+
+$ syschange checkpoints
+<time>  before anim
+
+$ syschange note Voxtype packages
+Recorded 1 change(s).
+
+$ syschange restore
+error: restore takes a checkpoint name, see syschange checkpoints
+
+$ syschange restore missing
+error: no checkpoint "missing"
+
+$ syschange restore before anim
+Config files restored. The state before is saved as a checkpoint too.
+To match the checkpoint, run as root:
+  sudo pacman -Rns voxtype
+
+$ syschange status
+Nothing new. Everything is recorded.
+
+$ syschange log
+<time>    Voxtype
+    + pkg:voxtype
+<time>  <commit>  AI line  [grok]
+    + mako/config
+<time>  <commit>  Undo: Git name
+    ~ ~/.gitconfig
+<time>  <commit>  Git name  (undone)
+    ~ ~/.gitconfig
+<time>  <commit>  (no description)
+    + kitty/kitty.conf
+<time>  <commit>  Voice typing  [codex]
+    ~ hypr/bindings.conf
+
+$ syschange untrack
+error: untrack needs at least one file
+
+$ syschange untrack ~/.gitconfig
+
+$ syschange track
+
+$ syschange export --to <tmp>/007/out.md
+Exported to <tmp>/007/out.md.
+
+$ syschange export --auto <tmp>/002/auto.md
+Exported to <tmp>/002/auto.md, and it will be kept up to date.
+
+$ syschange export --auto off
+Auto export is off.
+
+$ syschange export --auto <tmp>/001/config/x.md
+error: <tmp>/001/config/x.md is inside <tmp>/001/config, which syschange tracks: pick a file elsewhere
+
+$ syschange remote
+No backup remote. Set one: syschange remote set URL
+
+$ syschange push
+error: no backup remote, set one with: syschange remote set URL
+
+$ syschange remote bogus
+error: usage: syschange remote [set URL | off]
+
+$ syschange remote set <tmp>/004/b.git
+Backed up to <tmp>/004/b.git. Every change is pushed from now on.
+Keep that repository private: it holds your config files.
+
+$ syschange remote
+<tmp>/004/b.git
+last push <time>: ok
+
+$ syschange push
+Pushed to <tmp>/004/b.git.
+
+$ syschange push --quiet
+
+$ syschange remote off
+Backup is off. The remote keeps what it has.
+
+$ syschange apply
+error: usage: syschange apply [--yes] URL-or-path-of-a-backup
+
+$ syschange apply <tmp>/004/b.git
+From <tmp>/004/b.git:
+  nothing to do, this machine already matches (3 files identical)
+
+$ syschange apply <tmp>/005/o.git
+From <tmp>/005/o.git:
+  overwrite ~/.config/kitty/kitty.conf
+  add       ~/.config/mpv/mpv.conf
+error: run with --yes to apply
+
+$ syschange apply --yes <tmp>/005/o.git
+From <tmp>/005/o.git:
+  overwrite ~/.config/kitty/kitty.conf
+  add       ~/.config/mpv/mpv.conf
+Applied. Undo the config part with: syschange restore "Before applying <tmp>/005/o.git"
+
+$ syschange hook
+error: usage: syschange hook claude|codex|gemini|grok [start]
+
+$ syschange hook cursor
+error: usage: syschange hook claude|codex|gemini|grok [start]
+
+$ syschange hook claude start
+
+$ syschange hook claude start
+
+$ syschange hook claude pre
+
+$ syschange hook claude post
+
+$ syschange hook claude
+{"decision":"block","reason":"You changed this system during the session. Before finishing, record why, one short line per logical change:\n- modified hypr/bindings.conf (Key bindings)\n\nRun: syschange note --by claude \"\u003cwhy, in the user's language\u003e\" \u003cid\u003e...\nIf one of these is not yours, leave it out. To keep a path out of the history for good: syschange ignore \u003cpath\u003e."}
+
+$ syschange hook omarchy theme-set x
+
+$ syschange agents
+No supported agent found (Claude Code, Codex, Gemini CLI or Grok).
+
+$ syschange agents install
+error: no supported agent found (Claude Code, Codex, Gemini CLI or Grok)
+
+$ syschange agents status
+claude (Omarchy default): not connected, run: syschange agents install
+
+$ syschange agents install claude
+Connected: claude. Agents now describe the system changes they make.
+
+$ syschange status --json
+{"initialized":true,"count":0,"pending":null,"history":[{"time":"<time>","note":"Theme: x","by":"omarchy","commit":"<commit>","title":"Hyprland","touched":["hypr/bindings.conf"],"changes":[{"id":"hypr/bindings.conf","kind":"config","op":"modified","name":"hypr/bindings.conf","label":"Key bindings","added":1,"removed":1,"by":"claude","session":"s"}]},{"time":"<time>","note":"Applied setup from <tmp>/005/o.git","commit":"<commit>","title":"Kitty, mpv","changes":[{"id":"kitty/kitty.conf","kind":"config","op":"modified","name":"kitty/kitty.conf","label":"kitty.conf","added":1,"removed":1},{"id":"mpv/mpv.conf","kind":"config","op":"added","name":"mpv/mpv.conf","label":"mpv.conf","added":1}]},{"time":"<time>","note":"Voxtype","title":"Packages","changes":[{"id":"pkg:voxtype","kind":"package","op":"added","name":"voxtype","label":"voxtype"}]},{"time":"<time>","note":"AI line","by":"grok","commit":"<commit>","title":"Mako","changes":[{"id":"mako/config","kind":"config","op":"added","name":"mako/config","label":"config","added":1}]},{"time":"<time>","note":"Undo: Git name","commit":"<commit>","title":"~/.gitconfig","undoes":"<time>","changes":[{"id":"~/.gitconfig","kind":"config","op":"modified","name":"~/.gitconfig","label":".gitconfig","removed":1}]},{"time":"<time>","note":"Git name","commit":"<commit>","title":"~/.gitconfig","undone":true,"changes":[{"id":"~/.gitconfig","kind":"config","op":"modified","name":"~/.gitconfig","label":".gitconfig","added":1}]},{"time":"<time>","commit":"<commit>","title":"Kitty","changes":[{"id":"kitty/kitty.conf","kind":"config","op":"added","name":"kitty/kitty.conf","label":"kitty.conf","added":1}]},{"time":"<time>","note":"Voice typing","by":"codex","commit":"<commit>","title":"Hyprland","changes":[{"id":"hypr/bindings.conf","kind":"config","op":"modified","name":"hypr/bindings.conf","label":"Key bindings","added":1,"removed":1}]}],"configDir":"<tmp>/001/config","agents":[{"name":"claude","title":"Claude Code","connected":true,"default":true}],"checkpoints":[{"name":"Before applying <tmp>/005/o.git","time":"<time>","commit":"<commit>","packages":null,"units":null},{"name":"Before restoring before anim","time":"<time>","commit":"<commit>","packages":null,"units":null},{"name":"before anim","time":"<time>","commit":"<commit>","packages":null,"units":null}],"autoExport":"","version":"0.3.1"}
+
+$ syschange agents remove
+Disconnected all agents.
+
+$ syschange agents bogus
+error: unknown agents action "bogus": use install, remove or status
+

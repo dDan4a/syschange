@@ -1,0 +1,89 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  settings:
+    lll:
+      line-length: 150
+      tab-width: 4
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^errors\.As$
+          msg: use errors.AsType, it is type-safe and does not allocate
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    tagliatelle:
+      case:
+        rules:
+          json: snake
+    exhaustive:
+      default-signifies-exhaustive: true
+  enable:
+    - asasalint
+    - bodyclose
+    - canonicalheader
+    - copyloopvar
+    - durationcheck
+    - embeddedstructfieldcheck
+    - goconst
+    - asciicheck
+    - bidichk
+    - gosmopolitan
+    - iface
+    - lll
+    - loggercheck
+    - maintidx
+    - mirror
+    - nakedret
+    - perfsprint
+    - protogetter
+    - sloglint
+    - unconvert
+    - wastedassign
+    - whitespace
+    - contextcheck
+    - errname
+    - errorlint
+    - forbidigo
+    - gocheckcompilerdirectives
+    - gocritic
+    - makezero
+    - misspell
+    - nilerr
+    - noctx
+    - prealloc
+    - reassign
+    - rowserrcheck
+    - unparam
+    - wsl_v5
+    - containedctx
+    - errchkjson
+    - exhaustive
+    - exptostd
+    - fatcontext
+    - nilnesserr
+    - nilnil
+    - nolintlint
+    - predeclared
+    - modernize
+    - nosprintfhostport
+    - recvcheck
+    - sqlclosecheck
+    - tagliatelle
+    - thelper
+    - usestdlibvars
+    - usetesting
+  exclusions:
+    rules:
+      # test data reads better as literals; tests still use production constants where one exists
+      - linters: [goconst]
+        path: _test\.go$
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

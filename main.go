@@ -77,7 +77,6 @@ func main() {
 	}
 }
 
-//nolint:maintidx // one switch over every subcommand; splitting it is the separate feat/refactor-main branch
 func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		fmt.Fprint(stdout, usage)
@@ -94,344 +93,450 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 
-	cmd, args := args[0], args[1:]
+	name := args[0]
+
+	opts, rest, err := parseFlags(name, args[1:])
+	if err != nil {
+		return err
+	}
+
+	cmd, ok := commands[name]
+	if !ok {
+		return fmt.Errorf("unknown command %q, see syschange help", name)
+	}
+
+	return cmd(&invocation{sharedFlags: opts, s: s, args: rest, stdin: stdin, stdout: stdout})
+}
+
+type sharedFlags struct {
+	asJSON, color, yes, quiet, send, noDigest, all bool
+	exportTo, autoExport, grep, agent, by          string
+	days, remindDays                               int
+}
+
+func parseFlags(cmd string, args []string) (sharedFlags, []string, error) {
+	var f sharedFlags
+
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	asJSON := fs.Bool("json", false, "machine-readable output")
-	color := fs.Bool("color", false, "colored diff even when not writing to a terminal")
-	yes := fs.Bool("yes", false, "apply: do it without asking")
-	quiet := fs.Bool("quiet", false, "push: print nothing")
-	exportTo := fs.String("to", "", "export: write to this file instead of stdout")
-	autoExport := fs.String("auto", "", "export: keep this file updated after every record; off to stop")
-	days := fs.Int("days", 7, "digest: how many days back")
-	remindDays := fs.Int("remind-days", 3, "notify: remind about changes unrecorded this many days; 0 never")
-	send := fs.Bool("send", false, "notify, suggest --all: show the notifications instead of printing them")
-	noDigest := fs.Bool("no-digest", false, "notify: no weekly digest")
-	grep := fs.String("grep", "", "log: only entries that mention this text")
-	agentName := fs.String("agent", "", "agent for suggest; default: Omarchy's default agent")
-	all := fs.Bool("all", false, "suggest: describe and record every pending group")
+	fs.BoolVar(&f.asJSON, "json", false, "machine-readable output")
+	fs.BoolVar(&f.color, "color", false, "colored diff even when not writing to a terminal")
+	fs.BoolVar(&f.yes, "yes", false, "apply: do it without asking")
+	fs.BoolVar(&f.quiet, "quiet", false, "push: print nothing")
+	fs.StringVar(&f.exportTo, "to", "", "export: write to this file instead of stdout")
+	fs.StringVar(&f.autoExport, "auto", "", "export: keep this file updated after every record; off to stop")
+	fs.IntVar(&f.days, "days", 7, "digest: how many days back")
+	fs.IntVar(&f.remindDays, "remind-days", 3, "notify: remind about changes unrecorded this many days; 0 never")
+	fs.BoolVar(&f.send, "send", false, "notify, suggest --all: show the notifications instead of printing them")
+	fs.BoolVar(&f.noDigest, "no-digest", false, "notify: no weekly digest")
+	fs.StringVar(&f.grep, "grep", "", "log: only entries that mention this text")
+	fs.StringVar(&f.agent, "agent", "", "agent for suggest; default: Omarchy's default agent")
+	fs.BoolVar(&f.all, "all", false, "suggest: describe and record every pending group")
+	fs.StringVar(&f.by, "by", defaultAuthor(), "who made the change, for example an agent name")
 
-	by := fs.String("by", defaultAuthor(), "who made the change, for example an agent name")
 	if err := fs.Parse(args); err != nil {
+		return f, nil, err
+	}
+
+	return f, fs.Args(), nil
+}
+
+type invocation struct {
+	sharedFlags
+
+	s      *Store
+	args   []string
+	stdin  io.Reader
+	stdout io.Writer
+}
+
+var commands = map[string]func(*invocation) error{
+	"init":        cmdInit,
+	"status":      cmdStatus, //nolint:goconst // subcommand name, like every other key here
+	"note":        cmdNote,
+	"skip":        cmdSkip,
+	"checkpoint":  cmdCheckpoint,
+	"checkpoints": cmdCheckpoints,
+	"restore":     cmdRestore,
+	"suggest":     cmdSuggest,
+	"diff":        cmdDiff,
+	"revert":      cmdRevert,
+	"ignore":      cmdIgnore,
+	"track":       cmdTrack,
+	"untrack":     cmdUntrack,
+	"digest":      cmdDigest,
+	"notify":      cmdNotify,
+	"log":         cmdLog,
+	"apply":       cmdApply,
+	"remote":      cmdRemote,
+	"push":        cmdPush,
+	"export":      cmdExport,
+	"undo":        cmdUndo,
+	"hook":        cmdHook,
+	"agents":      cmdAgents,
+}
+
+func cmdStatus(c *invocation) error { return status(c.s, c.stdout, c.asJSON) }
+
+func cmdDiff(c *invocation) error { return c.s.Diff(c.stdout, c.args, c.color || isTerminal(c.stdout)) }
+
+func cmdLog(c *invocation) error { return printLog(c.s, c.stdout, c.grep, c.asJSON) }
+
+func cmdAgents(c *invocation) error { return agentsCmd(c.args, c.stdout) }
+
+func cmdInit(c *invocation) error {
+	if err := c.s.Init(); err != nil {
 		return err
 	}
 
-	args = fs.Args()
+	fmt.Fprintf(c.stdout, "Tracking %s. History lives in %s.\n", c.s.ConfigDir, c.s.StateDir)
 
-	switch cmd {
-	case "init":
-		if err := s.Init(); err != nil {
-			return err
-		}
+	return nil
+}
 
-		fmt.Fprintf(stdout, "Tracking %s. History lives in %s.\n", s.ConfigDir, s.StateDir)
-
-		return nil
-	case "status": //nolint:goconst // subcommand name, like every other case here
-		return status(s, stdout, *asJSON)
-	case "note":
-		if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
-			return errors.New("note needs a text: syschange note \"why\" [ID...]")
-		}
-
-		e, err := s.Record(args[1:], args[0], *by)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(stdout, "Recorded %d change(s).\n", len(e.Changes))
-
-		return nil
-	case "skip":
-		e, err := s.Record(args, "", *by)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(stdout, "Recorded %d change(s) without a description.\n", len(e.Changes))
-
-		return nil
-	case "checkpoint":
-		cp, err := s.Checkpoint(strings.Join(args, " "))
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(stdout, "Saved checkpoint %q.\n", cp.Name)
-
-		return nil
-	case "checkpoints":
-		all, err := s.Checkpoints()
-		if err != nil {
-			return err
-		}
-
-		for _, cp := range all {
-			fmt.Fprintf(stdout, "%s  %s\n", cp.Time.Format("2006-01-02 15:04"), cp.Name)
-		}
-
-		return nil
-	case "restore":
-		if len(args) == 0 {
-			return errors.New("restore takes a checkpoint name, see syschange checkpoints")
-		}
-
-		hint, err := s.Restore(strings.Join(args, " "), *by)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintln(stdout, "Config files restored. The state before is saved as a checkpoint too.")
-
-		if hint != "" {
-			fmt.Fprintln(stdout, hint)
-		}
-
-		return nil
-	case "suggest":
-		if *all {
-			return suggestAll(s, stdout, *agentName, *send)
-		}
-
-		line, err := s.Suggest(args, *agentName)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintln(stdout, line)
-
-		return nil
-	case "diff":
-		return s.Diff(stdout, args, *color || isTerminal(stdout))
-	case "revert":
-		if len(args) == 0 {
-			return errors.New("revert needs at least one ID")
-		}
-
-		return s.Revert(args)
-	case "ignore":
-		if len(args) != 1 {
-			return errors.New("ignore takes one path")
-		}
-
-		return s.Ignore(args[0])
-	case "track":
-		if len(args) > 0 {
-			return s.Track(args)
-		}
-
-		names, err := s.trackedFiles()
-		for _, n := range names {
-			fmt.Fprintln(stdout, n)
-		}
-
-		return err
-	case "untrack":
-		if len(args) == 0 {
-			return errors.New("untrack needs at least one file")
-		}
-
-		return s.Untrack(args)
-	case "digest":
-		history, err := s.History()
-		if err != nil {
-			return err
-		}
-
-		now := time.Now()
-
-		text := Digest(history, now.AddDate(0, 0, -*days), now)
-		if text == "" {
-			text = fmt.Sprintf("Nothing recorded in the last %d days.", *days)
-		}
-
-		fmt.Fprintln(stdout, text)
-
-		return nil
-	case "notify":
-		if !s.Initialized() {
-			return ErrNotInitialized
-		}
-
-		due, err := s.Notify(time.Now(), *remindDays, !*noDigest)
-		if err != nil {
-			return err
-		}
-
-		if !*send {
-			return json.NewEncoder(stdout).Encode(append([]Notification{}, due...))
-		}
-
-		for _, n := range due {
-			if err := sendNotification(n); err != nil {
-				return fmt.Errorf("notification: %w", err)
-			}
-		}
-
-		return nil
-	case "log":
-		return printLog(s, stdout, *grep, *asJSON)
-	case "apply":
-		if len(args) != 1 {
-			return errors.New("usage: syschange apply [--yes] URL-or-path-of-a-backup")
-		}
-
-		plan, err := s.PlanApply(args[0])
-		if err != nil {
-			return err
-		}
-		defer plan.Cleanup()
-
-		plan.Print(stdout)
-
-		if plan.Empty() {
-			return nil
-		}
-
-		if !*yes {
-			if !isTerminal(stdout) {
-				return errors.New("run with --yes to apply")
-			}
-
-			fmt.Fprint(stdout, "\nApply? A checkpoint of the current state is saved first. [y/N] ")
-
-			var answer string
-
-			_, _ = fmt.Fscanln(stdin, &answer)
-
-			if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
-				return errors.New("cancelled")
-			}
-		}
-
-		if err := s.Apply(plan, runAttached, *by); err != nil {
-			return err
-		}
-
-		fmt.Fprintln(stdout, "Applied. Undo the config part with: syschange restore \"Before applying "+args[0]+"\"")
-
-		return nil
-	case "remote":
-		switch {
-		case len(args) == 2 && args[0] == "set":
-			if err := s.SetRemote(args[1]); err != nil {
-				return err
-			}
-
-			fmt.Fprintf(stdout, "Backed up to %s. Every change is pushed from now on.\n", args[1])
-			fmt.Fprintln(stdout, "Keep that repository private: it holds your config files.")
-
-			return nil
-		case len(args) == 1 && args[0] == "off":
-			if err := s.SetRemote(""); err != nil {
-				return err
-			}
-
-			fmt.Fprintln(stdout, "Backup is off. The remote keeps what it has.")
-
-			return nil
-		case len(args) == 0:
-			if url := s.RemoteURL(); url != "" {
-				fmt.Fprintln(stdout, url)
-
-				if st := s.LastPush(); st != nil {
-					state := "ok"
-					if st.Error != "" {
-						state = st.Error
-					}
-
-					fmt.Fprintf(stdout, "last push %s: %s\n", st.Time.Format("2006-01-02 15:04"), state)
-				}
-			} else {
-				fmt.Fprintln(stdout, "No backup remote. Set one: syschange remote set URL")
-			}
-
-			return nil
-		}
-
-		return errors.New("usage: syschange remote [set URL | off]")
-	case "push":
-		if err := s.Push(); err != nil {
-			return err
-		}
-
-		if !*quiet {
-			fmt.Fprintf(stdout, "Pushed to %s.\n", s.RemoteURL())
-		}
-
-		return nil
-	case "export":
-		switch {
-		case *autoExport == "off":
-			if err := s.SetAutoExport(""); err != nil {
-				return err
-			}
-
-			fmt.Fprintln(stdout, "Auto export is off.")
-
-			return nil
-		case *autoExport != "":
-			if err := s.SetAutoExport(expandHome(*autoExport)); err != nil {
-				return err
-			}
-
-			fmt.Fprintf(stdout, "Exported to %s, and it will be kept up to date.\n", s.autoExportPath())
-
-			return nil
-		case *exportTo != "":
-			path := expandHome(*exportTo)
-			if err := s.ExportTo(path); err != nil {
-				return err
-			}
-
-			fmt.Fprintf(stdout, "Exported to %s.\n", path)
-
-			return nil
-		}
-
-		return s.Export(stdout)
-	case "undo":
-		if len(args) == 0 {
-			return errors.New("undo takes a history entry: its time (see status --json) or commit")
-		}
-
-		e, hint, err := s.Undo(args[0], *by, args[1:]...)
-		if err != nil {
-			return err
-		}
-
-		if len(e.Changes) > 0 {
-			fmt.Fprintf(stdout, "Undid %d config change(s).\n", len(e.Changes))
-		}
-
-		if hint != "" {
-			fmt.Fprintln(stdout, hint)
-		}
-
-		return nil
-	case "hook":
-		if len(args) >= 2 && args[0] == "omarchy" { //nolint:goconst // subcommand name, not the author or the config directory
-			return s.OmarchyHook(args[1], args[2:])
-		}
-
-		if len(args) == 0 || !slices.Contains([]string{agentClaude, agentCodex, agentGemini, agentGrok}, args[0]) {
-			return errors.New("usage: syschange hook claude|codex|gemini|grok [start]")
-		}
-
-		if len(args) > 1 {
-			switch args[1] {
-			case "start":
-				return s.SessionStartHook(args[0], stdin)
-			case "pre", "post":
-				return s.ToolHook(args[0], args[1] == "pre", stdin)
-			}
-		}
-
-		return s.StopHook(args[0], stdin, stdout)
-	case "agents":
-		return agentsCmd(args, stdout)
+func cmdNote(c *invocation) error {
+	if len(c.args) == 0 || strings.TrimSpace(c.args[0]) == "" {
+		return errors.New("note needs a text: syschange note \"why\" [ID...]")
 	}
 
-	return fmt.Errorf("unknown command %q, see syschange help", cmd)
+	e, err := c.s.Record(c.args[1:], c.args[0], c.by)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(c.stdout, "Recorded %d change(s).\n", len(e.Changes))
+
+	return nil
+}
+
+func cmdSkip(c *invocation) error {
+	e, err := c.s.Record(c.args, "", c.by)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(c.stdout, "Recorded %d change(s) without a description.\n", len(e.Changes))
+
+	return nil
+}
+
+func cmdCheckpoint(c *invocation) error {
+	cp, err := c.s.Checkpoint(strings.Join(c.args, " "))
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(c.stdout, "Saved checkpoint %q.\n", cp.Name)
+
+	return nil
+}
+
+func cmdCheckpoints(c *invocation) error {
+	all, err := c.s.Checkpoints()
+	if err != nil {
+		return err
+	}
+
+	for _, cp := range all {
+		fmt.Fprintf(c.stdout, "%s  %s\n", cp.Time.Format("2006-01-02 15:04"), cp.Name)
+	}
+
+	return nil
+}
+
+func cmdRestore(c *invocation) error {
+	if len(c.args) == 0 {
+		return errors.New("restore takes a checkpoint name, see syschange checkpoints")
+	}
+
+	hint, err := c.s.Restore(strings.Join(c.args, " "), c.by)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(c.stdout, "Config files restored. The state before is saved as a checkpoint too.")
+
+	if hint != "" {
+		fmt.Fprintln(c.stdout, hint)
+	}
+
+	return nil
+}
+
+func cmdSuggest(c *invocation) error {
+	if c.all {
+		return suggestAll(c.s, c.stdout, c.agent, c.send)
+	}
+
+	line, err := c.s.Suggest(c.args, c.agent)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintln(c.stdout, line)
+
+	return nil
+}
+
+func cmdRevert(c *invocation) error {
+	if len(c.args) == 0 {
+		return errors.New("revert needs at least one ID")
+	}
+
+	return c.s.Revert(c.args)
+}
+
+func cmdIgnore(c *invocation) error {
+	if len(c.args) != 1 {
+		return errors.New("ignore takes one path")
+	}
+
+	return c.s.Ignore(c.args[0])
+}
+
+func cmdTrack(c *invocation) error {
+	if len(c.args) > 0 {
+		return c.s.Track(c.args)
+	}
+
+	names, err := c.s.trackedFiles()
+	for _, n := range names {
+		fmt.Fprintln(c.stdout, n)
+	}
+
+	return err
+}
+
+func cmdUntrack(c *invocation) error {
+	if len(c.args) == 0 {
+		return errors.New("untrack needs at least one file")
+	}
+
+	return c.s.Untrack(c.args)
+}
+
+func cmdDigest(c *invocation) error {
+	history, err := c.s.History()
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+
+	text := Digest(history, now.AddDate(0, 0, -c.days), now)
+	if text == "" {
+		text = fmt.Sprintf("Nothing recorded in the last %d days.", c.days)
+	}
+
+	fmt.Fprintln(c.stdout, text)
+
+	return nil
+}
+
+func cmdNotify(c *invocation) error {
+	if !c.s.Initialized() {
+		return ErrNotInitialized
+	}
+
+	due, err := c.s.Notify(time.Now(), c.remindDays, !c.noDigest)
+	if err != nil {
+		return err
+	}
+
+	if !c.send {
+		return json.NewEncoder(c.stdout).Encode(append([]Notification{}, due...))
+	}
+
+	for _, n := range due {
+		if err := sendNotification(n); err != nil {
+			return fmt.Errorf("notification: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func cmdApply(c *invocation) error {
+	if len(c.args) != 1 {
+		return errors.New("usage: syschange apply [--yes] URL-or-path-of-a-backup")
+	}
+
+	plan, err := c.s.PlanApply(c.args[0])
+	if err != nil {
+		return err
+	}
+	defer plan.Cleanup()
+
+	plan.Print(c.stdout)
+
+	if plan.Empty() {
+		return nil
+	}
+
+	if !c.yes {
+		if err := confirmApply(c.stdin, c.stdout); err != nil {
+			return err
+		}
+	}
+
+	if err := c.s.Apply(plan, runAttached, c.by); err != nil {
+		return err
+	}
+
+	fmt.Fprintln(c.stdout, "Applied. Undo the config part with: syschange restore \"Before applying "+c.args[0]+"\"")
+
+	return nil
+}
+
+func confirmApply(stdin io.Reader, stdout io.Writer) error {
+	if !isTerminal(stdout) {
+		return errors.New("run with --yes to apply")
+	}
+
+	fmt.Fprint(stdout, "\nApply? A checkpoint of the current state is saved first. [y/N] ")
+
+	var answer string
+
+	_, _ = fmt.Fscanln(stdin, &answer)
+
+	if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+		return errors.New("cancelled")
+	}
+
+	return nil
+}
+
+func cmdRemote(c *invocation) error {
+	switch {
+	case len(c.args) == 2 && c.args[0] == "set":
+		if err := c.s.SetRemote(c.args[1]); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(c.stdout, "Backed up to %s. Every change is pushed from now on.\n", c.args[1])
+		fmt.Fprintln(c.stdout, "Keep that repository private: it holds your config files.")
+
+		return nil
+	case len(c.args) == 1 && c.args[0] == "off":
+		if err := c.s.SetRemote(""); err != nil {
+			return err
+		}
+
+		fmt.Fprintln(c.stdout, "Backup is off. The remote keeps what it has.")
+
+		return nil
+	case len(c.args) == 0:
+		printRemote(c.s, c.stdout)
+
+		return nil
+	}
+
+	return errors.New("usage: syschange remote [set URL | off]")
+}
+
+func printRemote(s *Store, w io.Writer) {
+	url := s.RemoteURL()
+	if url == "" {
+		fmt.Fprintln(w, "No backup remote. Set one: syschange remote set URL")
+		return
+	}
+
+	fmt.Fprintln(w, url)
+
+	if st := s.LastPush(); st != nil {
+		state := "ok"
+		if st.Error != "" {
+			state = st.Error
+		}
+
+		fmt.Fprintf(w, "last push %s: %s\n", st.Time.Format("2006-01-02 15:04"), state)
+	}
+}
+
+func cmdPush(c *invocation) error {
+	if err := c.s.Push(); err != nil {
+		return err
+	}
+
+	if !c.quiet {
+		fmt.Fprintf(c.stdout, "Pushed to %s.\n", c.s.RemoteURL())
+	}
+
+	return nil
+}
+
+func cmdExport(c *invocation) error {
+	switch {
+	case c.autoExport == "off":
+		if err := c.s.SetAutoExport(""); err != nil {
+			return err
+		}
+
+		fmt.Fprintln(c.stdout, "Auto export is off.")
+
+		return nil
+	case c.autoExport != "":
+		if err := c.s.SetAutoExport(expandHome(c.autoExport)); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(c.stdout, "Exported to %s, and it will be kept up to date.\n", c.s.autoExportPath())
+
+		return nil
+	case c.exportTo != "":
+		path := expandHome(c.exportTo)
+		if err := c.s.ExportTo(path); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(c.stdout, "Exported to %s.\n", path)
+
+		return nil
+	}
+
+	return c.s.Export(c.stdout)
+}
+
+func cmdUndo(c *invocation) error {
+	if len(c.args) == 0 {
+		return errors.New("undo takes a history entry: its time (see status --json) or commit")
+	}
+
+	e, hint, err := c.s.Undo(c.args[0], c.by, c.args[1:]...)
+	if err != nil {
+		return err
+	}
+
+	if len(e.Changes) > 0 {
+		fmt.Fprintf(c.stdout, "Undid %d config change(s).\n", len(e.Changes))
+	}
+
+	if hint != "" {
+		fmt.Fprintln(c.stdout, hint)
+	}
+
+	return nil
+}
+
+func cmdHook(c *invocation) error {
+	args := c.args
+	if len(args) >= 2 && args[0] == "omarchy" { //nolint:goconst // subcommand name, not the author or the config directory
+		return c.s.OmarchyHook(args[1], args[2:])
+	}
+
+	if len(args) == 0 || !slices.Contains([]string{agentClaude, agentCodex, agentGemini, agentGrok}, args[0]) {
+		return errors.New("usage: syschange hook claude|codex|gemini|grok [start]")
+	}
+
+	if len(args) > 1 {
+		switch args[1] {
+		case "start":
+			return c.s.SessionStartHook(args[0], c.stdin)
+		case "pre", "post":
+			return c.s.ToolHook(args[0], args[1] == "pre", c.stdin)
+		}
+	}
+
+	return c.s.StopHook(args[0], c.stdin, c.stdout)
 }
 
 func suggestAll(s *Store, w io.Writer, agent string, send bool) error {

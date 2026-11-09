@@ -159,9 +159,6 @@ Panel {
       return
     root.source.showDiff(root.source.diffKey === group.key ? "" : group.key)
   }
-  function diffColor(kind) {
-    return kind === "add" ? Color.accent : kind === "del" ? Color.urgent : kind === "file" ? root.foreground : root.dim
-  }
 
   function restoreCheckpoint(cp) {
     confirm("restore:" + cp.commit, function () {
@@ -243,25 +240,6 @@ Panel {
     if (next.length === 1)
       return "󰚩 Let " + next[0].title + " describe the system changes it makes"
     return "󰚩 Let your AI agents describe the system changes they make"
-  }
-
-  function sign(op) {
-    return op === "added" ? "+" : op === "removed" ? "−" : "~"
-  }
-  function opColor(op) {
-    return op === "added" ? Color.accent : op === "removed" ? Color.urgent : root.foreground
-  }
-  function changeText(c) {
-    var text = c.label
-    if (c.kind === "package")
-      text = (c.op === "added" ? "Installed " : "Removed ") + c.label
-    else if (c.kind === "unit")
-      text = (c.op === "added" ? "Enabled " : "Disabled ") + c.label
-    if (c.added || c.removed)
-      text += "  +" + (c.added || 0) + " −" + (c.removed || 0)
-    if (c.by)
-      text += "  󰚩 " + c.by
-    return text
   }
 
   function ago(iso) {
@@ -478,190 +456,8 @@ Panel {
             model: root.groups
             boundsBehavior: Flickable.StopAtBounds
 
-            delegate: Rectangle {
-              id: groupItem
-              required property var modelData
-              required property int index
-              readonly property bool isSelected: index === root.selected
-
-              width: ListView.view.width
-              height: groupColumn.implicitHeight + Style.space(12)
-              radius: Style.space(6)
-              color: isSelected || hover.hovered ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08) : "transparent"
-
-              HoverHandler {
-                id: hover
-              }
-              TapHandler {
-                onTapped: root.selected = groupItem.index
-              }
-
-              Column {
-                id: groupColumn
-                x: Style.space(8)
-                y: Style.space(6)
-                width: parent.width - Style.space(12)
-                spacing: Style.space(2)
-
-                Item {
-                  width: parent.width
-                  height: Math.max(titleText.implicitHeight, actions.implicitHeight)
-                  TapHandler {
-                    enabled: groupItem.modelData.key !== "packages" && groupItem.modelData.key !== "services"
-                    onTapped: {
-                      root.selected = groupItem.index
-                      root.toggleDiff(groupItem.modelData)
-                    }
-                  }
-                  Text {
-                    id: titleText
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.right: actions.left
-                    text: root.armed === "ignore:" + groupItem.modelData.key ? "Click again to stop tracking " + groupItem.modelData.title :
-                                                                               groupItem.modelData.title
-                    color: root.armed === "ignore:" + groupItem.modelData.key ? Color.urgent : root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.subtitle
-                    font.bold: true
-                    elide: Text.ElideRight
-                    textFormat: Text.PlainText
-                  }
-                  Row {
-                    id: actions
-                    anchors.right: parent.right
-                    spacing: Style.space(2)
-                    PanelActionButton {
-                      iconText: "󰏫" // nf-md-pencil
-                      tooltipText: "Describe why (Enter)"
-                      foreground: root.foreground
-                      onClicked: {
-                        root.selected = groupItem.index
-                        root.describe(groupItem.modelData)
-                      }
-                    }
-                    PanelActionButton {
-                      readonly property bool working: root.source !== null && root.source.suggestingKey === groupItem.modelData.key
-                      iconText: working ? "󰔟" : "󰁨" // nf-md-timer_sand / nf-md-auto_fix
-                      tooltipText: working ? "Asking your AI agent…" : "Describe with AI (a): your default agent reads the diff"
-                      foreground: working ? Color.accent : root.foreground
-                      enabled: root.source !== null && root.source.suggestingKey === ""
-                      onClicked: root.suggest(groupItem.modelData)
-                    }
-                    PanelActionButton {
-                      iconText: "󰄬" // nf-md-check
-                      tooltipText: "Keep without a description (s)"
-                      foreground: root.foreground
-                      onClicked: root.source.skip(groupItem.modelData.key)
-                    }
-                    PanelActionButton {
-                      visible: groupItem.modelData.key !== "packages" && groupItem.modelData.key !== "services"
-                      iconText: "󰦓" // nf-md-file_compare
-                      tooltipText: "Show diff (v)"
-                      foreground: root.foreground
-                      onClicked: root.source.openDiff(groupItem.modelData.key)
-                    }
-                    PanelActionButton {
-                      visible: groupItem.modelData.key !== "packages" && groupItem.modelData.key !== "services"
-                      iconText: "󰈉" // nf-md-eye_off
-                      tooltipText: "Stop tracking " + groupItem.modelData.title
-                      foreground: root.armed === "ignore:" + groupItem.modelData.key ? Color.urgent : root.foreground
-                      onClicked: root.ignoreGroup(groupItem.modelData)
-                    }
-                  }
-                }
-
-                Repeater {
-                  model: groupItem.modelData.changes
-                  delegate: Item {
-                    id: changeItem
-                    required property var modelData
-                    readonly property bool armed: root.armed === "revert:" + modelData.id
-                    width: groupColumn.width
-                    height: Math.max(changeText.implicitHeight, undo.implicitHeight)
-
-                    Text {
-                      id: signText
-                      anchors.verticalCenter: parent.verticalCenter
-                      width: Style.space(14)
-                      text: root.sign(changeItem.modelData.op)
-                      color: root.opColor(changeItem.modelData.op)
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.body
-                      font.bold: true
-                    }
-                    Text {
-                      id: changeText
-                      anchors.verticalCenter: parent.verticalCenter
-                      anchors.left: signText.right
-                      anchors.right: ignoreFile.left
-                      text: changeItem.armed ? "Click again to undo: " + changeItem.modelData.label : root.changeText(changeItem.modelData)
-                      color: changeItem.armed ? Color.urgent : root.foreground
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.body
-                      elide: Text.ElideMiddle
-                      textFormat: Text.PlainText
-                    }
-                    PanelActionButton {
-                      id: ignoreFile
-                      anchors.right: undo.left
-                      anchors.verticalCenter: parent.verticalCenter
-                      visible: changeItem.modelData.kind === "config"
-                      width: ignoreFile.visible ? ignoreFile.implicitWidth : 0
-                      iconText: "󰈉" // nf-md-eye_off
-                      tooltipText: "Stop tracking this file"
-                      foreground: root.dim
-                      onClicked: root.source.ignore(changeItem.modelData.name)
-                    }
-                    PanelActionButton {
-                      id: undo
-                      anchors.right: parent.right
-                      anchors.verticalCenter: parent.verticalCenter
-                      iconText: "󰕌" // nf-md-undo
-                      tooltipText: changeItem.modelData.kind === "config" ? "Undo this change" : "Show the command to undo"
-                      foreground: changeItem.armed ? Color.urgent : root.dim
-                      onClicked: root.revert(changeItem.modelData)
-                    }
-                  }
-                }
-
-                // Inline diff (o, or click the title). Long diffs: v opens a terminal.
-                Column {
-                  readonly property bool shown: root.source !== null && root.source.diffKey === groupItem.modelData.key
-                  visible: shown
-                  width: parent.width
-                  topPadding: Style.space(4)
-                  spacing: 0
-                  Text {
-                    visible: parent.shown && root.source.diffLines.length === 0
-                    text: "Loading diff…"
-                    color: root.dim
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                  }
-                  Repeater {
-                    model: parent.shown ? root.source.diffLines.slice(0, 40) : []
-                    delegate: Text {
-                      required property var modelData
-                      width: groupColumn.width
-                      text: modelData.text
-                      color: root.diffColor(modelData.kind)
-                      font.family: root.fontFamily
-                      font.pixelSize: Style.font.caption
-                      font.bold: modelData.kind === "file"
-                      elide: Text.ElideRight
-                      textFormat: Text.PlainText
-                    }
-                  }
-                  Text {
-                    visible: parent.shown && root.source.diffLines.length > 40
-                    text: "… " + (root.source ? root.source.diffLines.length - 40 : 0) + " more lines, press v for the full diff"
-                    color: root.dim
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                  }
-                }
-              }
+            delegate: GroupDelegate {
+              panel: root
             }
           }
 

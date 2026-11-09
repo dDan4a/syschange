@@ -52,8 +52,16 @@ func write(t *testing.T, root, rel, body string) {
 	}
 }
 
+func noErr(t *testing.T, err error) {
+	t.Helper()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func ids(changes []Change) []string {
-	var out []string
+	out := make([]string, 0, len(changes))
 	for _, c := range changes {
 		out = append(out, c.Op+" "+c.ID)
 	}
@@ -87,7 +95,7 @@ func TestRecordRevertIgnore(t *testing.T) {
 	s, pkgs := newTestStore(t)
 	write(t, s.ConfigDir, "hypr/bindings.conf", "bind = SUPER, Q, killactive\nbind = SUPER, R, exec, voxtype\n")
 	write(t, s.ConfigDir, "voxtype/config.toml", "model = \"base\"\n")
-	os.Remove(filepath.Join(s.ConfigDir, "git/config"))
+	noErr(t, os.Remove(filepath.Join(s.ConfigDir, "git/config")))
 
 	*pkgs = append(*pkgs, "voxtype")
 
@@ -189,14 +197,15 @@ func TestStopHook(t *testing.T) {
 	write(t, s.ConfigDir, "hypr/bindings.conf", "changed before the session\n")
 
 	past := time.Now().Add(-time.Hour)
-	os.Chtimes(old, past, past)
+	noErr(t, os.Chtimes(old, past, past))
 
 	transcript := filepath.Join(t.TempDir(), "t.jsonl")
 	start := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
-	os.WriteFile(transcript, []byte(`{"type":"summary"}`+"\n"+`{"timestamp":"`+start+`"}`+"\n"), 0o600)
+	noErr(t, os.WriteFile(transcript, []byte(`{"type":"summary"}`+"\n"+`{"timestamp":"`+start+`"}`+"\n"), 0o600))
 
 	hook := func(active bool) string {
-		in, _ := json.Marshal(map[string]any{"stop_hook_active": active, "transcript_path": transcript})
+		in, err := json.Marshal(map[string]any{"stop_hook_active": active, "transcript_path": transcript})
+		noErr(t, err)
 
 		var out bytes.Buffer
 		if err := s.StopHook("claude", bytes.NewReader(in), &out); err != nil {
@@ -241,13 +250,13 @@ func TestAgentsInstallRemove(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 	write(t, home, ".claude/settings.json", `{"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "other"}]}]}}`)
-	os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
-	os.MkdirAll(filepath.Join(home, ".gemini"), 0o755)
-	os.MkdirAll(filepath.Join(home, ".grok"), 0o755)
+	noErr(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
+	noErr(t, os.MkdirAll(filepath.Join(home, ".gemini"), 0o755))
+	noErr(t, os.MkdirAll(filepath.Join(home, ".grok"), 0o755))
 	g := &Agents{Home: home, Exe: "/opt/my bin/syschange"}
 	legacy := filepath.Join(home, ".agents/skills/syschange") // where v0.1.0 linked the skill
-	os.MkdirAll(filepath.Dir(legacy), 0o755)
-	os.Symlink(g.skillPath(), legacy)
+	noErr(t, os.MkdirAll(filepath.Dir(legacy), 0o755))
+	noErr(t, os.Symlink(g.skillPath(), legacy))
 
 	for range 2 { // installing twice changes nothing
 		done, err := g.Install()
@@ -264,7 +273,8 @@ func TestAgentsInstallRemove(t *testing.T) {
 	settings, _ := os.ReadFile(filepath.Join(home, ".claude/settings.json"))
 	if !strings.HasPrefix(string(settings), "{\n  \"model\"") || strings.Count(string(settings), "hook claude || true\"") != 1 ||
 		strings.Count(string(settings), "hook claude start") != 1 ||
-		!strings.Contains(string(settings), `"[ -x '/opt/my bin/syschange' ] && '/opt/my bin/syschange' hook claude || true"`) || !strings.Contains(string(settings), `"other"`) {
+		!strings.Contains(string(settings), `"[ -x '/opt/my bin/syschange' ] && '/opt/my bin/syschange' hook claude || true"`) ||
+		!strings.Contains(string(settings), `"other"`) {
 		t.Fatalf("settings.json:\n%s", settings)
 	}
 
@@ -336,7 +346,8 @@ func TestStopHookGrokAndGemini(t *testing.T) {
 	run("grok", true, `{"sessionId":"g-1"}`)
 	write(t, s.ConfigDir, "hypr/bindings.conf", "changed\n")
 
-	if out := run("grok", false, `{"sessionId":"g-1","stopHookActive":false}`); !strings.Contains(out, `"decision":"block"`) || !strings.Contains(out, "--by grok") {
+	if out := run("grok", false, `{"sessionId":"g-1","stopHookActive":false}`); !strings.Contains(out, `"decision":"block"`) ||
+		!strings.Contains(out, "--by grok") {
 		t.Fatalf("grok: %s", out)
 	}
 
@@ -360,7 +371,8 @@ func TestStopHookGrokAndGemini(t *testing.T) {
 
 	write(t, s.ConfigDir, "voxtype/config.toml", "x\n")
 
-	if out := run("gemini", false, `{"session_id":"m-1"}`); !strings.Contains(out, `"decision":"deny"`) || !strings.Contains(out, "voxtype/config.toml") {
+	if out := run("gemini", false, `{"session_id":"m-1"}`); !strings.Contains(out, `"decision":"deny"`) ||
+		!strings.Contains(out, "voxtype/config.toml") {
 		t.Fatalf("gemini: %s", out)
 	}
 }
@@ -416,7 +428,10 @@ func TestUndoRecordedEntry(t *testing.T) {
 	write(t, s.ConfigDir, "git/config", "[user]\nname = other\n")
 	e2, _ := s.Record(nil, "Rename", "")
 	write(t, s.ConfigDir, "git/config", "[user]\nname = third\n")
-	s.Record(nil, "Rename again", "")
+
+	if _, err := s.Record(nil, "Rename again", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, _, err := s.Undo(e2.Commit, ""); err == nil {
 		t.Fatal("conflicting undo must fail")
@@ -454,7 +469,7 @@ func TestOmarchyHooks(t *testing.T) {
 	write(t, cfg, "hypr/input.conf", "kb = us,ru\n")
 
 	past := time.Now().Add(-time.Hour)
-	os.Chtimes(filepath.Join(cfg, "hypr/input.conf"), past, past)
+	noErr(t, os.Chtimes(filepath.Join(cfg, "hypr/input.conf"), past, past))
 	write(t, cfg, "btop/btop.conf", "theme = b\n")
 
 	if err := s.OmarchyHook("theme-set", []string{"tokyo-night"}); err != nil {
@@ -462,7 +477,8 @@ func TestOmarchyHooks(t *testing.T) {
 	}
 
 	history, _ := s.History()
-	if len(history) != 1 || history[0].Note != "Theme: tokyo-night" || history[0].By != "omarchy" || ids(history[0].Changes)[0] != "modified btop/btop.conf" {
+	if len(history) != 1 || history[0].Note != "Theme: tokyo-night" || history[0].By != "omarchy" ||
+		ids(history[0].Changes)[0] != "modified btop/btop.conf" {
 		t.Fatalf("history %+v", history)
 	}
 
@@ -471,8 +487,11 @@ func TestOmarchyHooks(t *testing.T) {
 	}
 
 	// Running init again on an existing setup restores a deleted hook and records it.
-	os.Remove(s.omarchyHookPath("font-set"))
-	s.Record([]string{"omarchy"}, "", "")
+	noErr(t, os.Remove(s.omarchyHookPath("font-set")))
+
+	if _, err := s.Record([]string{"omarchy"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := s.Init(); err != nil {
 		t.Fatal(err)
@@ -486,8 +505,8 @@ func TestOmarchyHooks(t *testing.T) {
 func TestUndoSymlink(t *testing.T) {
 	s, _ := newTestStore(t)
 	link := filepath.Join(s.ConfigDir, "omarchy/plugins/mine")
-	os.MkdirAll(filepath.Dir(link), 0o755)
-	os.Symlink(t.TempDir(), link)
+	noErr(t, os.MkdirAll(filepath.Dir(link), 0o755))
+	noErr(t, os.Symlink(t.TempDir(), link))
 
 	e, err := s.Record(nil, "Plugin", "")
 	if err != nil || len(e.Changes) != 1 {
@@ -517,7 +536,7 @@ func TestSuggest(t *testing.T) {
 	bin := t.TempDir()
 	// A fake agent: prints chatter, then the answer, and records the prompt it got.
 	script := "#!/bin/sh\ncat > " + filepath.Join(bin, "prompt") + "\necho 'Thinking...'\necho '- \"Голосовой ввод по Super+R.\"'\n"
-	os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755)
+	noErr(t, os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755))
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	t.Setenv("LANG", "ru_RU.UTF-8")
 
@@ -546,8 +565,8 @@ func TestSuggest(t *testing.T) {
 		"Что делает этот файл?",
 		strings.Repeat("слово ", 30),
 	} {
-		os.WriteFile(filepath.Join(bin, "reply"), []byte(reply+"\n"), 0o644)
-		os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\ncat >/dev/null\ncat "+filepath.Join(bin, "reply")+"\n"), 0o755)
+		noErr(t, os.WriteFile(filepath.Join(bin, "reply"), []byte(reply+"\n"), 0o644))
+		noErr(t, os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\ncat >/dev/null\ncat "+filepath.Join(bin, "reply")+"\n"), 0o755))
 
 		if line, err := s.Suggest([]string{"hypr"}, "claude"); err == nil || !strings.Contains(err.Error(), "describe it yourself") {
 			t.Errorf("reply %q: suggest = %q, %v", reply, line, err)
@@ -567,7 +586,7 @@ func TestAttributionFromToolCalls(t *testing.T) {
 	write(t, s.ConfigDir, "git/config", "[user]\nname = me2\n")
 
 	past := time.Now().Add(-time.Minute)
-	os.Chtimes(filepath.Join(s.ConfigDir, "git/config"), past, past)
+	noErr(t, os.Chtimes(filepath.Join(s.ConfigDir, "git/config"), past, past))
 	// ...and the agent edits another one during its call.
 	tool(true, "t1")
 	write(t, s.ConfigDir, "hypr/bindings.conf", "agent\n")
@@ -589,8 +608,8 @@ func TestAttributionFromToolCalls(t *testing.T) {
 	var out bytes.Buffer
 
 	transcript := filepath.Join(t.TempDir(), "t.jsonl")
-	os.WriteFile(transcript, []byte(`{"timestamp":"`+time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)+`"}`+"\n"), 0o600)
-	s.StopHook("claude", strings.NewReader(`{"session_id":"s-1","transcript_path":"`+transcript+`"}`), &out)
+	noErr(t, os.WriteFile(transcript, []byte(`{"timestamp":"`+time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)+`"}`+"\n"), 0o600))
+	noErr(t, s.StopHook("claude", strings.NewReader(`{"session_id":"s-1","transcript_path":"`+transcript+`"}`), &out))
 
 	if !strings.Contains(out.String(), "hypr/bindings.conf") || strings.Contains(out.String(), "git/config") {
 		t.Fatalf("stop hook: %s", out.String())
@@ -614,10 +633,13 @@ func TestCheckpointRestore(t *testing.T) {
 	}
 	// The experiment: edit, delete, add, record some of it, install a package.
 	write(t, s.ConfigDir, "hypr/bindings.conf", "experiment\n")
-	os.Remove(filepath.Join(s.ConfigDir, "kitty/kitty.conf"))
-	os.Remove(filepath.Join(s.ConfigDir, "git/config"))
+	noErr(t, os.Remove(filepath.Join(s.ConfigDir, "kitty/kitty.conf")))
+	noErr(t, os.Remove(filepath.Join(s.ConfigDir, "git/config")))
 	write(t, s.ConfigDir, "waybar/config.jsonc", "{}\n")
-	s.Record([]string{"hypr", "git"}, "Experiment", "")
+
+	if _, err := s.Record([]string{"hypr", "git"}, "Experiment", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	*pkgs = append(*pkgs, "waybar")
 
@@ -626,7 +648,9 @@ func TestCheckpointRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for path, want := range map[string]string{"hypr/bindings.conf": "at checkpoint\n", "kitty/kitty.conf": "font_size 12\n", "git/config": "[user]\nname = me\n"} {
+	for path, want := range map[string]string{
+		"hypr/bindings.conf": "at checkpoint\n", "kitty/kitty.conf": "font_size 12\n", "git/config": "[user]\nname = me\n",
+	} {
 		if b, err := os.ReadFile(filepath.Join(s.ConfigDir, path)); err != nil || string(b) != want {
 			t.Errorf("%s = %q, %v; want %q", path, b, err, want)
 		}
@@ -671,8 +695,8 @@ func TestCheckpointRestore(t *testing.T) {
 func TestAgentsInstallOnlyNamed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
-	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
-	os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
+	noErr(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
+	noErr(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
 
 	g := &Agents{Home: home, Exe: "/usr/bin/syschange", Default: "claude"}
 	if done, err := g.Install("claude"); err != nil || !slices.Equal(done, []string{"claude"}) {
@@ -715,19 +739,27 @@ func TestAutoExport(t *testing.T) {
 		t.Fatalf("auto export not updated:\n%s", b)
 	}
 
-	s.SetAutoExport("")
+	noErr(t, s.SetAutoExport(""))
 	write(t, s.ConfigDir, "hypr/bindings.conf", "y\n")
-	s.Record(nil, "After off", "")
+
+	if _, err := s.Record(nil, "After off", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	if b, _ := os.ReadFile(out); strings.Contains(string(b), "After off") {
 		t.Fatal("auto export still on")
 	}
 }
 
+func bareRepo(t *testing.T, dir string) {
+	t.Helper()
+	noErr(t, exec.CommandContext(t.Context(), "git", "init", "--bare", "--quiet", dir).Run())
+}
+
 func gitIn(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 
-	out, err := exec.Command("git", append([]string{"--git-dir=" + dir}, args...)...).CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), "git", append([]string{"--git-dir=" + dir}, args...)...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
@@ -739,10 +771,13 @@ func TestBackupRemote(t *testing.T) {
 	s, _ := newTestStore(t)
 	s.ListForeign = func() ([]string, error) { return []string{"yay-bin"}, nil }
 	remote := filepath.Join(t.TempDir(), "backup.git")
-	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
+	bareRepo(t, remote)
 
 	write(t, s.ConfigDir, "hypr/bindings.conf", "pushed\n")
-	s.Record(nil, "Before the backup", "")
+
+	if _, err := s.Record(nil, "Before the backup", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := s.SetRemote(remote); err != nil {
 		t.Fatal(err)
@@ -767,22 +802,28 @@ func TestBackupRemote(t *testing.T) {
 	// Nothing new: no new state commit. A checkpoint: its ref goes along.
 	before := gitIn(t, remote, "rev-parse", "state")
 
-	s.Push()
+	noErr(t, s.Push())
 
 	if gitIn(t, remote, "rev-parse", "state") != before {
 		t.Fatal("an unchanged state made a new commit")
 	}
 
-	s.Checkpoint("cp")
-	s.Push()
+	if _, err := s.Checkpoint("cp"); err != nil {
+		t.Fatal(err)
+	}
+
+	noErr(t, s.Push())
 
 	if refs := gitIn(t, remote, "for-each-ref", "refs/checkpoints"); refs == "" {
 		t.Fatal("checkpoint ref not pushed")
 	}
 
 	// A broken remote is reported, not hidden.
-	s.SetRemote("")
-	s.git(nil, "remote", "add", backupRemote, filepath.Join(t.TempDir(), "missing.git"))
+	noErr(t, s.SetRemote(""))
+
+	if _, err := s.git(nil, "remote", "add", backupRemote, filepath.Join(t.TempDir(), "missing.git")); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := s.Push(); err == nil || s.LastPush().Error == "" {
 		t.Fatal("push to a missing remote must fail and be noted")
@@ -797,17 +838,17 @@ func TestApplyFromBackup(t *testing.T) {
 	a.ListForeign = func() ([]string, error) { return []string{"yay-bin"}, nil }
 	write(t, a.ConfigDir, "hypr/bindings.conf", "bind = SUPER, R, exec, voxtype\n")
 	write(t, a.ConfigDir, "voxtype/config.toml", "model = \"base\"\n")
-	os.Remove(filepath.Join(a.ConfigDir, "git/config"))
+	noErr(t, os.Remove(filepath.Join(a.ConfigDir, "git/config")))
 
 	*aPkgs = append(*aPkgs, "voxtype", "yay-bin")
-	aUnits = append(aUnits, "user voxtype.service")
+	aUnits = []string{"system sshd.service", "user voxtype.service"}
 
 	if _, err := a.Record(nil, "Voice typing", ""); err != nil {
 		t.Fatal(err)
 	}
 
 	remote := filepath.Join(t.TempDir(), "backup.git")
-	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
+	bareRepo(t, remote)
 
 	if err := a.SetRemote(remote); err != nil {
 		t.Fatal(err)
@@ -817,7 +858,9 @@ func TestApplyFromBackup(t *testing.T) {
 	b, bPkgs := newTestStore(t)
 	*bPkgs = append(*bPkgs, "yay-bin")
 
-	b.Record([]string{"packages"}, "", "")
+	if _, err := b.Record([]string{"packages"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	plan, err := b.PlanApply(remote)
 	if err != nil {
@@ -825,7 +868,7 @@ func TestApplyFromBackup(t *testing.T) {
 	}
 	defer plan.Cleanup()
 
-	var files []string
+	files := make([]string, 0, len(plan.Files))
 	for _, f := range plan.Files {
 		files = append(files, f.Action+" "+f.Path)
 	}
@@ -917,7 +960,8 @@ func TestOmarchyTouchedYourFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if b, _ := os.ReadFile(filepath.Join(s.ConfigDir, "hypr/bindings.conf")); !strings.Contains(string(b), "voxtype") || strings.Contains(string(b), "SUPER, W") {
+	if b, _ := os.ReadFile(filepath.Join(s.ConfigDir, "hypr/bindings.conf")); !strings.Contains(string(b), "voxtype") ||
+		strings.Contains(string(b), "SUPER, W") {
 		t.Fatalf("your bindings are not back:\n%s", b)
 	}
 
@@ -957,7 +1001,7 @@ func TestNotifyRemindAndDigest(t *testing.T) {
 	write(t, s.ConfigDir, "waybar/config.jsonc", "{}\n")
 
 	old := now.AddDate(0, 0, -5)
-	os.Chtimes(filepath.Join(s.ConfigDir, "waybar/config.jsonc"), old, old)
+	noErr(t, os.Chtimes(filepath.Join(s.ConfigDir, "waybar/config.jsonc"), old, old))
 
 	if due, _ := s.Notify(now, 7, false); len(due) != 0 {
 		t.Fatalf("five days is under the limit: %+v", due)
@@ -978,7 +1022,9 @@ func TestNotifyRemindAndDigest(t *testing.T) {
 		t.Fatalf("digest %+v %v", due, err)
 	}
 
-	for _, want := range []string{"2 entries, 3 changes.", "Config: Hyprland (1), Kitty (1).", "Installed: voxtype.", "By: claude 1, you 1.", "1 without a description."} {
+	for _, want := range []string{
+		"2 entries, 3 changes.", "Config: Hyprland (1), Kitty (1).", "Installed: voxtype.", "By: claude 1, you 1.", "1 without a description.",
+	} {
 		if !strings.Contains(due[0].Body, want) {
 			t.Fatalf("digest lacks %q:\n%s", want, due[0].Body)
 		}

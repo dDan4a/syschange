@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -105,8 +104,8 @@ func TestTrackHomeFiles(t *testing.T) {
 		t.Fatalf("revert left %q", got)
 	}
 
-	os.Chmod(filepath.Join(home, ".claude/settings.json"), 0o600)
-	os.Remove(filepath.Join(home, ".claude/settings.json"))
+	noErr(t, os.Chmod(filepath.Join(home, ".claude/settings.json"), 0o600))
+	noErr(t, os.Remove(filepath.Join(home, ".claude/settings.json")))
 
 	if p, _ := s.Pending(); !slices.Equal(ids(p), []string{"removed ~/.claude/settings.json"}) {
 		t.Fatalf("pending %v", ids(p))
@@ -122,8 +121,12 @@ func TestTrackHomeFiles(t *testing.T) {
 		t.Fatalf("restored as %v %v", info, err)
 	}
 
-	os.Remove(filepath.Join(home, ".claude/settings.json"))
-	s.Record([]string{"~/.claude"}, "drop it again", "")
+	noErr(t, os.Remove(filepath.Join(home, ".claude/settings.json")))
+
+	if _, err := s.Record([]string{"~/.claude"}, "drop it again", ""); err != nil {
+		t.Fatal(err)
+	}
+
 	write(t, home, ".claude/settings.json", "{}\n")
 
 	if p, _ := s.Pending(); !slices.Equal(ids(p), []string{"added ~/.claude/settings.json"}) {
@@ -166,13 +169,13 @@ func TestTrackRefuses(t *testing.T) {
 	write(t, home, ".netrc-token", "x\n")
 	write(t, home, ".npmrc", "_authToken=abcdefghijkl\n")
 	write(t, home, "bin.dat", "a\x00b")
-	os.Symlink(filepath.Join(outside, "f"), filepath.Join(home, "link"))
-	os.Symlink(outside, filepath.Join(home, "dirlink"))
-	os.Symlink(filepath.Join(home, ".gitconfig"), filepath.Join(home, "inner"))
+	noErr(t, os.Symlink(filepath.Join(outside, "f"), filepath.Join(home, "link")))
+	noErr(t, os.Symlink(outside, filepath.Join(home, "dirlink")))
+	noErr(t, os.Symlink(filepath.Join(home, ".gitconfig"), filepath.Join(home, "inner")))
 	write(t, home, ".netrc", "machine x login me password hunter2\n")
 	write(t, home, ".kube/config", "client-key-data: LS0tLS1\n")
 	write(t, home, ".bash_history", "ls\n")
-	syscall.Mkfifo(filepath.Join(home, "fifo"), 0o600)
+	noErr(t, syscall.Mkfifo(filepath.Join(home, "fifo"), 0o600))
 
 	for _, p := range []string{
 		filepath.Join(outside, "f"),   // outside $HOME
@@ -210,7 +213,7 @@ func TestTrackRefuses(t *testing.T) {
 
 func TestCheckpointRestoreHomeFiles(t *testing.T) {
 	s, home := newHomeStore(t)
-	s.Track([]string{"~/.gitconfig"})
+	noErr(t, s.Track([]string{"~/.gitconfig"}))
 	write(t, home, ".gitconfig", "at checkpoint\n")
 
 	cp, err := s.Checkpoint("cp")
@@ -219,9 +222,12 @@ func TestCheckpointRestoreHomeFiles(t *testing.T) {
 	}
 
 	write(t, home, ".gitconfig", "later\n")
-	s.Record(nil, "later", "")
+
+	if _, err := s.Record(nil, "later", ""); err != nil {
+		t.Fatal(err)
+	}
 	// Tracked after the checkpoint: restoring it must not delete the file.
-	s.Track([]string{"~/.claude/settings.json"})
+	noErr(t, s.Track([]string{"~/.claude/settings.json"}))
 
 	if _, err := s.Restore(cp.Name, ""); err != nil {
 		t.Fatal(err)
@@ -234,7 +240,7 @@ func TestCheckpointRestoreHomeFiles(t *testing.T) {
 	readFile(t, filepath.Join(home, ".claude/settings.json"))
 
 	// Untracked since: the checkpoint still has it, the config dir must not get it.
-	s.Untrack([]string{"~/.gitconfig"})
+	noErr(t, s.Untrack([]string{"~/.gitconfig"}))
 
 	if _, err := s.Restore(cp.Name, ""); err != nil {
 		t.Fatal(err)
@@ -247,13 +253,17 @@ func TestCheckpointRestoreHomeFiles(t *testing.T) {
 
 func TestApplyHomeFiles(t *testing.T) {
 	a, aHome := newHomeStore(t)
-	a.Track([]string{"~/.gitconfig", "~/.claude/settings.json"})
+	noErr(t, a.Track([]string{"~/.gitconfig", "~/.claude/settings.json"}))
 	write(t, aHome, ".gitconfig", "[user]\nname = there\n")
-	a.Record(nil, "setup", "")
-	a.Untrack([]string{"~/.claude/settings.json"})
+
+	if _, err := a.Record(nil, "setup", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	noErr(t, a.Untrack([]string{"~/.claude/settings.json"}))
 
 	remote := filepath.Join(t.TempDir(), "r.git")
-	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
+	bareRepo(t, remote)
 
 	if err := a.SetRemote(remote); err != nil {
 		t.Fatal(err)

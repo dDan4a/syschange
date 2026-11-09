@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -196,7 +195,7 @@ func TestCLICheckpointsAndExport(t *testing.T) {
 		t.Fatalf("a new export must be private: %v %v", info, err)
 	}
 
-	os.Chmod(file, 0o640)
+	noErr(t, os.Chmod(file, 0o640))
 	must(t, c.ok("export", "--to", file), "Exported to")
 
 	if info, _ := os.Stat(file); info.Mode().Perm() != 0o640 {
@@ -215,7 +214,7 @@ func TestCLIRemoteAndApply(t *testing.T) {
 	c.fails("usage: syschange remote", "remote", "bogus")
 
 	remote := filepath.Join(t.TempDir(), "b.git")
-	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
+	bareRepo(t, remote)
 	must(t, c.ok("remote", "set", remote), "Keep that repository private")
 	must(t, c.ok("remote"), "last push")
 	must(t, c.ok("push"), "Pushed to")
@@ -230,16 +229,20 @@ func TestCLIRemoteAndApply(t *testing.T) {
 	must(t, c.ok("apply", remote), "nothing to do")
 	c.fails("fetch", "apply", t.TempDir())
 	empty := filepath.Join(t.TempDir(), "e.git")
-	exec.Command("git", "init", "--bare", "--quiet", empty).Run()
+	bareRepo(t, empty)
 	c.fails("not a syschange backup", "apply", empty)
 	// A plan with work needs --yes when not on a terminal.
 	other := filepath.Join(t.TempDir(), "o.git")
-	exec.Command("git", "init", "--bare", "--quiet", other).Run()
+	bareRepo(t, other)
 
 	a, _ := newTestStore(t)
 	write(t, a.ConfigDir, "kitty/kitty.conf", "x\n")
-	a.Record(nil, "kitty", "")
-	a.SetRemote(other)
+
+	if _, err := a.Record(nil, "kitty", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	noErr(t, a.SetRemote(other))
 	c.fails("--yes", "apply", other)
 	must(t, c.ok("apply", "--yes", other), "Applied.")
 }
@@ -281,15 +284,15 @@ func TestCLIHooksAndAgents(t *testing.T) {
 
 	must(t, c.ok("agents"), "No supported agent")
 	c.fails("no supported agent", "agents", "install")
-	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
-	os.MkdirAll(filepath.Join(home, ".config", "omarchy", "defaults"), 0o755)
-	os.WriteFile(filepath.Join(home, ".config", "omarchy", "defaults", "agent"), []byte("claude\n"), 0o644)
+	noErr(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
+	noErr(t, os.MkdirAll(filepath.Join(home, ".config", "omarchy", "defaults"), 0o755))
+	noErr(t, os.WriteFile(filepath.Join(home, ".config", "omarchy", "defaults", "agent"), []byte("claude\n"), 0o644))
 	must(t, c.ok("agents", "status"), "claude (Omarchy default): not connected")
 	must(t, c.ok("agents", "install", "claude"), "Connected: claude")
 	must(t, c.ok("agents"), "claude (Omarchy default): connected")
 
 	var st statusJSON
-	json.Unmarshal([]byte(c.ok("status", "--json")), &st)
+	noErr(t, json.Unmarshal([]byte(c.ok("status", "--json")), &st))
 
 	if len(st.Agents) != 1 || !st.Agents[0].Connected || !st.Agents[0].Default {
 		t.Fatalf("agents in status %+v", st.Agents)
@@ -302,11 +305,13 @@ func TestCLIHooksAndAgents(t *testing.T) {
 func TestCLISuggest(t *testing.T) {
 	c := newCLI(t)
 	bin := t.TempDir()
-	os.WriteFile(filepath.Join(bin, "codex"), []byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\necho 'Short line' > \"$out\"\n"), 0o755)
-	os.WriteFile(filepath.Join(bin, "grok"), []byte("#!/bin/sh\necho 'from grok'\n"), 0o755)
-	os.WriteFile(filepath.Join(bin, "gemini"), []byte("#!/bin/sh\necho oops >&2\nexit 3\n"), 0o755)
+	noErr(t, os.WriteFile(filepath.Join(bin, "codex"),
+		[]byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = -o ] && out=$2; shift; done\necho 'Short line' > \"$out\"\n"), 0o755))
+	noErr(t, os.WriteFile(filepath.Join(bin, "grok"), []byte("#!/bin/sh\necho 'from grok'\n"), 0o755))
+	noErr(t, os.WriteFile(filepath.Join(bin, "gemini"), []byte("#!/bin/sh\necho oops >&2\nexit 3\n"), 0o755))
 	// An Omarchy stub that would install the agent on first run must never be run.
-	os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/bash\nmise use -g --quiet \"claude\" || exit 1\nexec mise x claude -- claude \"$@\"\n"), 0o755)
+	noErr(t, os.WriteFile(filepath.Join(bin, "claude"),
+		[]byte("#!/bin/bash\nmise use -g --quiet \"claude\" || exit 1\nexec mise x claude -- claude \"$@\"\n"), 0o755))
 	t.Setenv("PATH", bin+":/usr/bin:/bin")
 	write(t, c.s.ConfigDir, "hypr/bindings.conf", "x\n")
 	must(t, c.ok("suggest", "--agent", "codex", "hypr"), "Short line")
@@ -322,7 +327,7 @@ func TestCLISuggestAll(t *testing.T) {
 	c := newCLI(t)
 	bin := t.TempDir()
 	// Fails on the Waybar group only: the others still get recorded.
-	os.WriteFile(filepath.Join(bin, "grok"), []byte("#!/bin/sh\ngrep -q Waybar \"$2\" && exit 1\necho 'AI line'\n"), 0o755)
+	noErr(t, os.WriteFile(filepath.Join(bin, "grok"), []byte("#!/bin/sh\ngrep -q Waybar \"$2\" && exit 1\necho 'AI line'\n"), 0o755))
 	t.Setenv("PATH", bin+":/usr/bin:/bin")
 	c.fails("nothing to describe", "suggest", "--all", "--agent", "grok")
 	write(t, c.s.ConfigDir, "hypr/bindings.conf", "x\n")

@@ -28,11 +28,11 @@ func TestUndoRefusesWhenTheFileMovedOn(t *testing.T) {
 			func() { write(t, s.ConfigDir, "new/a.conf", "1\n") },
 			func() { write(t, s.ConfigDir, "new/a.conf", "2\n") }, "edited after it was created"},
 		{"exists again",
-			func() { os.Remove(filepath.Join(s.ConfigDir, "git/config")) },
+			func() { noErr(t, os.Remove(filepath.Join(s.ConfigDir, "git/config"))) },
 			func() { write(t, s.ConfigDir, "git/config", "back\n") }, "exists again"},
 		{"deleted since",
 			func() { write(t, s.ConfigDir, "hypr/bindings.conf", "changed\n") },
-			func() { os.Remove(filepath.Join(s.ConfigDir, "hypr/bindings.conf")) }, "was deleted"},
+			func() { noErr(t, os.Remove(filepath.Join(s.ConfigDir, "hypr/bindings.conf"))) }, "was deleted"},
 	}
 	for _, tc := range cases {
 		tc.change()
@@ -43,7 +43,10 @@ func TestUndoRefusesWhenTheFileMovedOn(t *testing.T) {
 		}
 
 		tc.later()
-		s.Record(nil, "later", "")
+
+		if _, err := s.Record(nil, "later", ""); err != nil {
+			t.Fatal(err)
+		}
 
 		if _, _, err := s.Undo(e.ID(), ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v", tc.name, err)
@@ -51,14 +54,17 @@ func TestUndoRefusesWhenTheFileMovedOn(t *testing.T) {
 	}
 
 	link := filepath.Join(s.ConfigDir, "links/l")
-	os.MkdirAll(filepath.Dir(link), 0o755)
-	os.Symlink("/one", link)
+	noErr(t, os.MkdirAll(filepath.Dir(link), 0o755))
+	noErr(t, os.Symlink("/one", link))
 
 	e, _ := s.Record(nil, "link", "")
 
-	os.Remove(link)
-	os.Symlink("/two", link)
-	s.Record(nil, "relinked", "")
+	noErr(t, os.Remove(link))
+	noErr(t, os.Symlink("/two", link))
+
+	if _, err := s.Record(nil, "relinked", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, _, err := s.Undo(e.ID(), ""); err == nil || !strings.Contains(err.Error(), "edited after it was created") {
 		t.Errorf("relinked: %v", err)
@@ -107,7 +113,7 @@ func TestDiffOfEveryKind(t *testing.T) {
 	s, pkgs := newTestStore(t)
 	*pkgs = append(*pkgs, "vim")
 
-	os.Remove(filepath.Join(s.ConfigDir, "git/config"))
+	noErr(t, os.Remove(filepath.Join(s.ConfigDir, "git/config")))
 
 	var out bytes.Buffer
 	if err := s.Diff(&out, nil, false); err != nil {
@@ -128,18 +134,20 @@ func TestApplyAURServicesAndFailures(t *testing.T) {
 	a.ListUnits = func() ([]string, error) { return slices.Clone(units), nil }
 	a.ListForeign = func() ([]string, error) { return []string{"paru-bin"}, nil }
 	link := filepath.Join(a.ConfigDir, "omarchy/plugins/p")
-	os.MkdirAll(filepath.Dir(link), 0o755)
-	os.Symlink("/opt/plugin", link)
+	noErr(t, os.MkdirAll(filepath.Dir(link), 0o755))
+	noErr(t, os.Symlink("/opt/plugin", link))
 
 	*aPkgs = append(*aPkgs, "paru-bin")
 	*aPkgs = slices.DeleteFunc(*aPkgs, func(p string) bool { return p == "git" })
 
-	units = append(units, "system bluetooth.service")
+	units = []string{"system sshd.service", "system bluetooth.service"}
 
-	a.Record(nil, "setup", "")
+	if _, err := a.Record(nil, "setup", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	remote := filepath.Join(t.TempDir(), "r.git")
-	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
+	bareRepo(t, remote)
 
 	if err := a.SetRemote(remote); err != nil {
 		t.Fatal(err)
@@ -153,7 +161,8 @@ func TestApplyAURServicesAndFailures(t *testing.T) {
 	}
 	defer plan.Cleanup()
 
-	if !slices.Equal(plan.AUR, []string{"paru-bin"}) || !slices.Equal(plan.Removals, []string{"git"}) || !slices.Equal(plan.Units, []string{"system bluetooth.service"}) {
+	if !slices.Equal(plan.AUR, []string{"paru-bin"}) || !slices.Equal(plan.Removals, []string{"git"}) ||
+		!slices.Equal(plan.Units, []string{"system bluetooth.service"}) {
 		t.Fatalf("plan %+v", plan)
 	}
 
@@ -193,7 +202,8 @@ func TestApplyAURServicesAndFailures(t *testing.T) {
 
 		return nil
 	}, "")
-	if err == nil || !strings.Contains(err.Error(), "enabling bluetooth.service") || !slices.Contains(ran, "sudo systemctl enable --now -- bluetooth.service") {
+	if err == nil || !strings.Contains(err.Error(), "enabling bluetooth.service") ||
+		!slices.Contains(ran, "sudo systemctl enable --now -- bluetooth.service") {
 		t.Fatalf("err %v ran %v", err, ran)
 	}
 
@@ -208,16 +218,19 @@ func TestApplyAURServicesAndFailures(t *testing.T) {
 func TestApplyInitializesAFreshMachine(t *testing.T) {
 	a, _ := newTestStore(t)
 	write(t, a.ConfigDir, "kitty/kitty.conf", "x\n")
-	a.Record(nil, "kitty", "")
+
+	if _, err := a.Record(nil, "kitty", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	remote := filepath.Join(t.TempDir(), "r.git")
-	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
-	a.SetRemote(remote)
+	bareRepo(t, remote)
+	noErr(t, a.SetRemote(remote))
 
 	dir := t.TempDir()
 	b := &Store{ConfigDir: filepath.Join(dir, "cfg"), StateDir: filepath.Join(dir, "state"),
 		ListPackages: func() ([]string, error) { return nil, nil }, ListUnits: func() ([]string, error) { return nil, nil }}
-	os.MkdirAll(b.ConfigDir, 0o755)
+	noErr(t, os.MkdirAll(b.ConfigDir, 0o755))
 
 	plan, err := b.PlanApply(remote)
 	if err != nil {
@@ -237,11 +250,13 @@ func TestApplyInitializesAFreshMachine(t *testing.T) {
 func TestPruneWindows(t *testing.T) {
 	s, _ := newTestStore(t)
 	old := window{Agent: "claude", Session: "old", Start: time.Now().Add(-60 * 24 * time.Hour), End: time.Now().Add(-60 * 24 * time.Hour)}
-	b, _ := json.Marshal(old)
+	b, err := json.Marshal(old)
+	noErr(t, err)
+
 	line := string(b) + "\n"
 
-	os.MkdirAll(s.StateDir, 0o700)
-	os.WriteFile(s.path("agent-windows.jsonl"), []byte(strings.Repeat(line, 600<<10/len(line)+1)), 0o600)
+	noErr(t, os.MkdirAll(s.StateDir, 0o700))
+	noErr(t, os.WriteFile(s.path("agent-windows.jsonl"), []byte(strings.Repeat(line, 600<<10/len(line)+1)), 0o600))
 	s.pruneWindows()
 
 	if ws := s.windows(); len(ws) != 0 {
@@ -260,9 +275,9 @@ func TestChangeTimeAndAttributionOfPackages(t *testing.T) {
 
 	*pkgs = append(*pkgs, "vim")
 	in := `{"session_id":"s","tool_use_id":"1"}`
-	s.ToolHook("claude", true, strings.NewReader(in))
+	noErr(t, s.ToolHook("claude", true, strings.NewReader(in)))
 	time.Sleep(10 * time.Millisecond)
-	s.ToolHook("claude", false, strings.NewReader(in))
+	noErr(t, s.ToolHook("claude", false, strings.NewReader(in)))
 	p, _ := s.Pending()
 	s.Attribute(p)
 
@@ -278,7 +293,7 @@ func TestChangeTimeAndAttributionOfPackages(t *testing.T) {
 		t.Fatal("a missing file has no time")
 	}
 	// A post without a pre records nothing.
-	s.ToolHook("claude", false, strings.NewReader(`{"session_id":"s","tool_use_id":"x"}`))
+	noErr(t, s.ToolHook("claude", false, strings.NewReader(`{"session_id":"s","tool_use_id":"x"}`)))
 }
 
 func TestOmarchyNotesAndAncestors(t *testing.T) {
@@ -343,8 +358,10 @@ func TestSmallHelpers(t *testing.T) {
 }
 
 func jqEditBroken(t *testing.T) (string, error) {
+	t.Helper()
+
 	f := filepath.Join(t.TempDir(), "broken.json")
-	os.WriteFile(f, []byte("{not json"), 0o644)
+	noErr(t, os.WriteFile(f, []byte("{not json"), 0o644))
 
 	return "", jqEdit(f, ".")
 }
@@ -382,7 +399,7 @@ func TestConcurrentRecordsKeepTheirOwnFiles(t *testing.T) {
 			case <-stop:
 				return
 			default:
-				s.Pending()
+				_, _ = s.Pending()
 			}
 		}
 	}()
@@ -426,8 +443,14 @@ func TestRestoreLeavesFilesItCannotSave(t *testing.T) {
 	s, _ := newTestStore(t)
 	write(t, s.ConfigDir, "app/keep.conf", "v1\n")
 	write(t, s.ConfigDir, "app/gone.conf", "v1\n")
-	s.Record(nil, "add", "")
-	s.Checkpoint("point")
+
+	if _, err := s.Record(nil, "add", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.Checkpoint("point"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Ignored since, and edited: no checkpoint has the edit.
 	if err := s.Ignore("app/keep.conf"); err != nil {
@@ -436,8 +459,11 @@ func TestRestoreLeavesFilesItCannotSave(t *testing.T) {
 
 	write(t, s.ConfigDir, "app/keep.conf", "my edit\n")
 	// Removed from the history, then created again holding a secret.
-	os.Remove(filepath.Join(s.ConfigDir, "app/gone.conf"))
-	s.Record(nil, "remove", "")
+	noErr(t, os.Remove(filepath.Join(s.ConfigDir, "app/gone.conf")))
+
+	if _, err := s.Record(nil, "remove", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	secret := "token = ghp_abcdefghijklmnopqrstuvwxyz0123\n"
 	write(t, s.ConfigDir, "app/gone.conf", secret)
@@ -465,13 +491,16 @@ func TestApplyWillNotDeleteAFileWithASecret(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	os.Remove(filepath.Join(a.ConfigDir, "app/conf.ini"))
+	noErr(t, os.Remove(filepath.Join(a.ConfigDir, "app/conf.ini")))
 	write(t, a.ConfigDir, "other/x", "y\n")
-	a.Record(nil, "remove", "")
+
+	if _, err := a.Record(nil, "remove", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	remote := filepath.Join(t.TempDir(), "r.git")
-	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
-	a.SetRemote(remote)
+	bareRepo(t, remote)
+	noErr(t, a.SetRemote(remote))
 
 	b, _ := newTestStore(t)
 	write(t, b.ConfigDir, "app/conf.ini", "token = ghp_abcdefghijklmnopqrstuvwxyz0123\n")
@@ -483,18 +512,17 @@ func TestApplyWillNotDeleteAFileWithASecret(t *testing.T) {
 
 func TestApplyHomeFileOnAFreshMachine(t *testing.T) {
 	a, _ := newHomeStore(t)
-	a.Track([]string{"~/.gitconfig"})
-	a.Record(nil, "setup", "")
+	noErr(t, a.Track([]string{"~/.gitconfig"}))
 
 	remote := filepath.Join(t.TempDir(), "r.git")
-	exec.Command("git", "init", "--bare", "--quiet", remote).Run()
-	a.SetRemote(remote)
+	bareRepo(t, remote)
+	noErr(t, a.SetRemote(remote))
 
 	dir := t.TempDir()
 	b := &Store{ConfigDir: filepath.Join(dir, "cfg"), StateDir: filepath.Join(dir, "state"), HomeDir: filepath.Join(dir, "home"),
 		ListPackages: func() ([]string, error) { return nil, nil }, ListUnits: func() ([]string, error) { return nil, nil }}
-	os.MkdirAll(b.ConfigDir, 0o755)
-	os.MkdirAll(b.HomeDir, 0o755)
+	noErr(t, os.MkdirAll(b.ConfigDir, 0o755))
+	noErr(t, os.MkdirAll(b.HomeDir, 0o755))
 
 	plan, err := b.PlanApply(remote)
 	if err != nil {
@@ -517,15 +545,21 @@ func TestApplyHomeFileOnAFreshMachine(t *testing.T) {
 func TestTornJournalLineDoesNotBreakHistory(t *testing.T) {
 	s, _ := newTestStore(t)
 	write(t, s.ConfigDir, "app/a", "x\n")
-	s.Record(nil, "kept", "")
+
+	if _, err := s.Record(nil, "kept", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	f, err := os.OpenFile(s.path("journal.jsonl"), os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	f.WriteString(`{"time":"2026-`)
-	f.Close()
+	if _, err := f.WriteString(`{"time":"2026-`); err != nil {
+		t.Fatal(err)
+	}
+
+	noErr(t, f.Close())
 
 	history, err := s.History()
 	if err != nil || len(history) != 1 || history[0].Note != "kept" {

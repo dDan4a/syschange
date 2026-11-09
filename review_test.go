@@ -14,10 +14,10 @@ import (
 func evilBackup(t *testing.T, entries map[string]string, state map[string]string) string {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "evil.git")
-	exec.Command("git", "init", "--bare", "--quiet", repo).Run()
+	bareRepo(t, repo)
 
 	g := func(stdin string, args ...string) string {
-		cmd := exec.Command("git", append([]string{"--git-dir=" + repo}, args...)...)
+		cmd := exec.CommandContext(t.Context(), "git", append([]string{"--git-dir=" + repo}, args...)...)
 		cmd.Stdin = strings.NewReader(stdin)
 
 		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=x", "GIT_AUTHOR_EMAIL=x@x", "GIT_COMMITTER_NAME=x", "GIT_COMMITTER_EMAIL=x@x")
@@ -112,11 +112,11 @@ func TestApplyWillNotOverwriteAFileWithASecret(t *testing.T) {
 func TestWritesNeverFollowSymlinks(t *testing.T) {
 	s, _ := newTestStore(t)
 	outside := filepath.Join(t.TempDir(), "dotfiles.conf")
-	os.WriteFile(outside, []byte("mine\n"), 0o644)
+	noErr(t, os.WriteFile(outside, []byte("mine\n"), 0o644))
 	// A config file that is a link to a dotfiles copy is replaced, not written through.
 	link := filepath.Join(s.ConfigDir, "app", "linked.conf")
-	os.MkdirAll(filepath.Dir(link), 0o755)
-	os.Symlink(outside, link)
+	noErr(t, os.MkdirAll(filepath.Dir(link), 0o755))
+	noErr(t, os.Symlink(outside, link))
 
 	if err := s.writeEntry("app/linked.conf", []byte("restored\n"), false); err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestWritesNeverFollowSymlinks(t *testing.T) {
 		t.Fatalf("wrote through the link: %q", b)
 	}
 	// A symlinked directory leading outside is refused.
-	os.Symlink(filepath.Dir(outside), filepath.Join(s.ConfigDir, "out"))
+	noErr(t, os.Symlink(filepath.Dir(outside), filepath.Join(s.ConfigDir, "out")))
 
 	if err := s.writeEntry("out/x.conf", []byte("x"), false); err == nil {
 		t.Fatal("wrote through a symlinked directory")
@@ -139,7 +139,10 @@ func TestWritesNeverFollowSymlinks(t *testing.T) {
 
 func TestRestoreRefusesToLoseUnsavedChanges(t *testing.T) {
 	s, _ := newTestStore(t)
-	s.Checkpoint("clean")
+	if _, err := s.Checkpoint("clean"); err != nil {
+		t.Fatal(err)
+	}
+
 	write(t, s.ConfigDir, "git/config", "[user]\n\tpassword = hunter2hunter2\n")
 
 	if _, err := s.Restore("clean", ""); err == nil || !strings.Contains(err.Error(), "git/config") {
@@ -156,10 +159,10 @@ func TestAgentConfigsSymlinkedAndForeignHooks(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 	dotfiles := filepath.Join(t.TempDir(), "settings.json")
 	// A prompt-type hook has no "command": it must not break anything.
-	os.WriteFile(dotfiles, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"prompt","prompt":"check"}]}]}}`), 0o644)
-	os.MkdirAll(filepath.Join(home, ".claude"), 0o755)
+	noErr(t, os.WriteFile(dotfiles, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"prompt","prompt":"check"}]}]}}`), 0o644))
+	noErr(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
 	settings := filepath.Join(home, ".claude", "settings.json")
-	os.Symlink(dotfiles, settings)
+	noErr(t, os.Symlink(dotfiles, settings))
 
 	g := &Agents{Home: home, Exe: "/usr/bin/syschange"}
 	if _, err := g.Install(); err != nil {
@@ -194,7 +197,10 @@ func TestAgentConfigsSymlinkedAndForeignHooks(t *testing.T) {
 func TestIgnoreGlobUntracksTrackedFiles(t *testing.T) {
 	s, _ := newTestStore(t)
 	write(t, s.ConfigDir, "hypr/extra.conf", "x\n")
-	s.Record(nil, "", "")
+
+	if _, err := s.Record(nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := s.Ignore("hypr/*.conf"); err != nil {
 		t.Fatal(err)

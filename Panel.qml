@@ -201,15 +201,6 @@ Panel {
       return install + " Your widget settings point at " + binary + ": clear that setting to use the installed one."
     return install
   }
-  function entryAuthor(e) {
-    if (e.by)
-      return e.by
-    var seen = []
-    for (let i = 0; i < e.changes.length; i++)
-      if (e.changes[i].by && seen.indexOf(e.changes[i].by) < 0)
-        seen.push(e.changes[i].by)
-    return seen.join(", ")
-  }
 
   // Omarchy's default agent comes first and alone; the other installed agents
   // are offered once it is connected.
@@ -581,85 +572,8 @@ Panel {
             model: root.shownHistory.slice(0, 30)
             boundsBehavior: Flickable.StopAtBounds
 
-            delegate: Item {
-              id: entryItem
-              required property var modelData
-              readonly property bool armed: root.armed === "undo:" + modelData.time
-              width: ListView.view.width
-              height: entryColumn.implicitHeight
-              opacity: modelData.undone ? 0.5 : 1
-
-              Column {
-                id: entryColumn
-                anchors.left: parent.left
-                anchors.right: undoEntryButton.left
-                anchors.rightMargin: Style.space(4)
-                spacing: Style.space(1)
-
-                Text {
-                  width: parent.width
-                  text: entryItem.armed ? "Click again to undo this" : (entryItem.modelData.note || "No description") + (root.entryAuthor(
-                                                                                                                           entryItem.modelData)
-                                                                                                                         ? "  󰚩 " + root.entryAuthor(
-                                                                                                                             entryItem.modelData) :
-                                                                                                                           "")
-                  color: entryItem.armed ? Color.urgent : entryItem.modelData.note ? root.foreground : root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  font.italic: !entryItem.modelData.note
-                  font.strikeout: entryItem.modelData.undone === true
-                  elide: Text.ElideRight
-                  textFormat: Text.PlainText
-                }
-                Item {
-                  readonly property bool armed: root.armed === "keep:" + entryItem.modelData.time
-                  visible: (entryItem.modelData.touched || []).length > 0
-                  width: parent.width
-                  height: visible ? Math.max(touchedText.implicitHeight, keepButton.implicitHeight) : 0
-                  Text {
-                    id: touchedText
-                    anchors.left: parent.left
-                    anchors.right: keepButton.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: parent.armed ? "Click again to bring your version back" : "Changed your edits: " + (entryItem.modelData.touched || []).join(
-                                           ", ")
-
-                    color: Color.urgent
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    elide: Text.ElideMiddle
-                    textFormat: Text.PlainText
-                  }
-                  PanelActionButton {
-                    id: keepButton
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    iconText: "󰦛" // nf-md-restore
-                    tooltipText: "Keep mine: undo the update in these files only, your other edits and its other changes stay"
-                    foreground: parent.armed ? Color.urgent : root.foreground
-                    onClicked: root.keepMine(entryItem.modelData)
-                  }
-                }
-                Text {
-                  width: parent.width
-                  text: root.ago(entryItem.modelData.time) + " · " + entryItem.modelData.title + (entryItem.modelData.undone ? " · undone" : "")
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                  textFormat: Text.PlainText
-                }
-              }
-              PanelActionButton {
-                id: undoEntryButton
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                visible: !entryItem.modelData.undone
-                iconText: "󰕌" // nf-md-undo
-                tooltipText: "Undo this change"
-                foreground: entryItem.armed ? Color.urgent : root.dim
-                onClicked: root.undoEntry(entryItem.modelData)
-              }
+            delegate: HistoryDelegate {
+              panel: root
             }
           }
 

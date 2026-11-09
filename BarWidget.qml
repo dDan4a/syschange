@@ -17,14 +17,27 @@ BarWidget {
   readonly property int count: source ? source.count : 0
   readonly property string error: source ? source.error : ""
 
-  function open() { if (panelLoader.item) panelLoader.item.open() }
-  function close() { if (panelLoader.item) panelLoader.item.close() }
-  function togglePanel() { if (panelLoader.item) panelLoader.item.toggle() }
-  function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
+  function open() {
+    if (panelLoader.item)
+      panelLoader.item.open()
+  }
+  function close() {
+    if (panelLoader.item)
+      panelLoader.item.close()
+  }
+  function togglePanel() {
+    if (panelLoader.item)
+      panelLoader.item.toggle()
+  }
+  function closeForPopoutSwitch() {
+    if (panelLoader.item)
+      panelLoader.item.closeForPopoutSwitch()
+  }
 
   function injectPanel() {
     var target = panelLoader.item
-    if (!target) return
+    if (!target)
+      return
     target.bar = root.bar
     target.settings = root.settings
     target.anchorItem = button
@@ -34,7 +47,8 @@ BarWidget {
 
   // Settings live on the bar widget entry; push them into the shared service.
   function configureSource() {
-    if (!source) return
+    if (!source)
+      return
     source.binary = String(setting("binary", "syschange")).replace(/^~(?=\/)/, Quickshell.env("HOME"))
     source.intervalSec = Number(setting("refreshIntervalSec", 30))
     source.remindDays = Number(setting("remindDays", 3))
@@ -45,15 +59,24 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
   onBarChanged: injectPanel()
-  onSettingsChanged: { configureSource(); injectPanel() }
-  onSourceChanged: { configureSource(); injectPanel() }
+  onSettingsChanged: {
+    configureSource()
+    injectPanel()
+  }
+  onSourceChanged: {
+    configureSource()
+    injectPanel()
+  }
 
   Loader {
     id: panelLoader
     active: true
     source: Qt.resolvedUrl("Panel.qml")
     visible: false
-    onLoaded: { root.injectPanel(); Qt.callLater(root.injectPanel) }
+    onLoaded: {
+      root.injectPanel()
+      Qt.callLater(root.injectPanel)
+    }
   }
 
   WidgetButton {
@@ -63,13 +86,20 @@ BarWidget {
     active: root.opened
     // nf-md-history
     text: root.count > 0 ? "󰋚 " + root.count : "󰋚"
-    foreground: root.error !== "" || (root.source && root.source.overdue) ? Color.urgent : root.count > 0 ? Color.accent : (root.bar ? root.bar.barForeground : Color.foreground)
+    foreground: root.error !== "" || (root.source && root.source.overdue) ? Color.urgent : root.count > 0 ? Color.accent : (root.bar
+                                                                                                                            ? root.bar.barForeground :
+                                                                                                                              Color.foreground)
     dimmed: root.count === 0 && root.error === ""
-    tooltipText: root.source && root.source.missing ? "System changes: click to install"
-      : root.error !== "" ? "System changes: " + root.error
-      : root.count === 0 ? "System changes: everything is recorded"
-      : root.source && root.source.overdue ? "System changes: " + root.count + " new, waiting " + root.source.pendingDays + " days to be described"
-      : "System changes: " + root.count + " new, click to describe or undo"
+    tooltipText: root.source && root.source.missing ? "System changes: click to install" : root.error !== "" ? "System changes: " + root.error :
+                                                                                                               root.count === 0
+                                                                                                               ? "System changes: everything is recorded" :
+                                                                                                                 root.source && root.source.overdue
+                                                                                                                 ? "System changes: " + root.count
+                                                                                                                   + " new, waiting "
+                                                                                                                   + root.source.pendingDays
+                                                                                                                   + " days to be described" :
+                                                                                                                   "System changes: " + root.count
+                                                                                                                   + " new, click to describe or undo"
     onPressed: root.togglePanel()
   }
 }

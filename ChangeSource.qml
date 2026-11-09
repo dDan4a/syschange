@@ -28,7 +28,9 @@ Item {
   property var history: []      // entries: {time, note, by, changes: [...]}
   property int count: 0
   property var agents: []       // installed coding agents: {name, connected}
-  readonly property bool agentsConnected: agents.length > 0 && agents.every(function(a) { return a.connected })
+  readonly property bool agentsConnected: agents.length > 0 && agents.every(function (a) {
+    return a.connected
+  })
   // Errors of the last action stay until the next action or until dismissed; a
   // later status poll must not wipe "run this as root" or "undo it by hand".
   // A failed AI description also ends when nothing is left to describe.
@@ -52,7 +54,10 @@ Item {
   property bool refreshAgain: false
   function refresh() {
     // A poll already running may predate the last action: run once more after it.
-    if (statusProcess.running) { refreshAgain = true; return }
+    if (statusProcess.running) {
+      refreshAgain = true
+      return
+    }
     // Through sh, so a missing binary is a clear exit 127 instead of a failed spawn.
     statusProcess.command = ["sh", "-c", 'command -v "$0" >/dev/null 2>&1 || exit 127; exec "$0" status --json', binary]
     statusProcess.running = true
@@ -63,7 +68,8 @@ Item {
     var x = a.split("."), y = b.split(".")
     for (var i = 0; i < 3; i++) {
       var d = (parseInt(x[i]) || 0) - (parseInt(y[i]) || 0)
-      if (d !== 0) return d > 0
+      if (d !== 0)
+        return d > 0
     }
     return false
   }
@@ -72,12 +78,12 @@ Item {
   // one, else with a Go that mise fetches for this command only. Then starts
   // tracking (or, on an update, refreshes the hooks).
   function installCli() {
-    var script = 'set -e; export GOBIN="$HOME/.local/bin"; mod="github.com/dDan4a/syschange@v' + cliVersion + '"; ' +
-      'echo "Building $mod into $GOBIN"; ' +
-      'if command -v go >/dev/null 2>&1; then go install "$mod"; else mise exec go@latest -- go install "$mod"; fi; ' +
-      '"$GOBIN/syschange" init; echo; echo "Done. The bar picks it up in a few seconds."'
-    Quickshell.execDetached(["setsid", "uwsm-app", "--", "xdg-terminal-exec", "--app-id=org.omarchy.terminal",
-      "--title=Install syschange", "-e", "bash", "-c", script + '; read -rsn1 -p "Press any key to close"'])
+    var script = 'set -e; export GOBIN="$HOME/.local/bin"; mod="github.com/dDan4a/syschange@v' + cliVersion + '"; '
+        + 'echo "Building $mod into $GOBIN"; '
+        + 'if command -v go >/dev/null 2>&1; then go install "$mod"; else mise exec go@latest -- go install "$mod"; fi; '
+        + '"$GOBIN/syschange" init; echo; echo "Done. The bar picks it up in a few seconds."'
+    Quickshell.execDetached(["setsid", "uwsm-app", "--", "xdg-terminal-exec", "--app-id=org.omarchy.terminal", "--title=Install syschange", "-e",
+                             "bash", "-c", script + '; read -rsn1 -p "Press any key to close"'])
     installPoll.restart()
   }
 
@@ -87,10 +93,12 @@ Item {
   property var queue: []
   function act(args) {
     queue = queue.concat([args])
-    if (!actionProcess.running) runNext()
+    if (!actionProcess.running)
+      runNext()
   }
   function runNext() {
-    if (queue.length === 0) return
+    if (queue.length === 0)
+      return
     var args = queue[0]
     queue = queue.slice(1)
     notice = ""
@@ -99,31 +107,53 @@ Item {
     actionProcess.running = true
   }
 
-  function start() { act(["init"]) }
-  function connectAgents(names) { act(["agents", "install"].concat(names || [])) }
-  function note(key, text) { act(["note", text, key]) }
-  function skip(key) { act(["skip", key]) }
-  function revert(id) { act(["revert", id]) }
-  function ignore(path) { act(["ignore", path]) }
-  function undo(entryTime, paths) { act(["undo", entryTime].concat(paths || [])) }
+  function start() {
+    act(["init"])
+  }
+  function connectAgents(names) {
+    act(["agents", "install"].concat(names || []))
+  }
+  function note(key, text) {
+    act(["note", text, key])
+  }
+  function skip(key) {
+    act(["skip", key])
+  }
+  function revert(id) {
+    act(["revert", id])
+  }
+  function ignore(path) {
+    act(["ignore", path])
+  }
+  function undo(entryTime, paths) {
+    act(["undo", entryTime].concat(paths || []))
+  }
   // Exports to the file kept in sync if there is one, else to the configured
   // path, then opens it.
   function exportMarkdown() {
     var path = autoExport || exportPath
-    if (path === "" || exportProcess.running) return
+    if (path === "" || exportProcess.running)
+      return
     dismissError()
     exportProcess.path = path
     exportProcess.command = [binary, "export", "--to", path]
     exportProcess.running = true
   }
 
-  function push() { act(["push"]) }
+  function push() {
+    act(["push"])
+  }
 
-  function checkpoint(name) { act(["checkpoint", name]) }
-  function restore(commit) { act(["restore", commit]) }
+  function checkpoint(name) {
+    act(["checkpoint", name])
+  }
+  function restore(commit) {
+    act(["restore", commit])
+  }
 
   function suggest(key) {
-    if (suggestProcess.running) return
+    if (suggestProcess.running)
+      return
     dismissError()
     suggestingKey = key
     suggestProcess.command = [binary, "suggest", key]
@@ -131,7 +161,8 @@ Item {
   }
   // Describes and records every group; the CLI shows the result as a notification.
   function suggestAll() {
-    if (suggestProcess.running) return
+    if (suggestProcess.running)
+      return
     dismissError()
     suggestingKey = "@all"
     suggestProcess.command = [binary, "suggest", "--all", "--send"]
@@ -141,7 +172,10 @@ Item {
   function search(q) {
     query = q
     searchProcess.running = false
-    if (q === "") { found = []; return }
+    if (q === "") {
+      found = []
+      return
+    }
     searchProcess.command = [binary, "log", "--json", "--grep", q]
     searchProcess.running = true
   }
@@ -149,7 +183,8 @@ Item {
   function showDiff(key) {
     diffKey = key
     diffLines = []
-    if (key === "") return
+    if (key === "")
+      return
     diffProcess.running = false
     diffProcess.command = [binary, "diff", key]
     diffProcess.running = true
@@ -159,50 +194,76 @@ Item {
   function parseDiff(text) {
     var out = []
     var firstHunk = true
-    var header = false // before a file's first hunk; inside hunks "--- x" is a removed line "-- x"
+    var header = false
+    // before a file's first hunk; inside hunks "--- x" is a removed line "-- x"
     var lines = String(text || "").split("\n")
     for (var i = 0; i < lines.length; i++) {
       var l = lines[i]
       if (l.indexOf("diff --git ") === 0) {
         var m = / b\/(.*)$/.exec(l)
-        out.push({ kind: "file", text: m ? m[1] : l })
+        out.push({
+                   kind: "file",
+                   text: m ? m[1] : l
+                 })
         firstHunk = true
         header = true
       } else if (header && /^(index |--- |\+\+\+ |new file|deleted file|old mode|new mode|similarity)/.test(l)) {
         continue
       } else if (l.indexOf("@@") === 0) {
         header = false
-        if (!firstHunk) out.push({ kind: "hunk", text: "⋯" }) // a gap between hunks of one file
+        if (!firstHunk)
+          out.push({
+                     kind: "hunk",
+                     text: "⋯"
+                   })
+        // a gap between hunks of one file
         firstHunk = false
       } else if (l[0] === "+") {
-        out.push({ kind: "add", text: l })
+        out.push({
+                   kind: "add",
+                   text: l
+                 })
       } else if (l[0] === "-") {
-        out.push({ kind: "del", text: l })
+        out.push({
+                   kind: "del",
+                   text: l
+                 })
       } else if (l !== "") {
-        out.push({ kind: "ctx", text: l })
+        out.push({
+                   kind: "ctx",
+                   text: l
+                 })
       }
     }
     return out
   }
 
   function openDiff(key) {
-    Quickshell.execDetached(["setsid", "uwsm-app", "--", "xdg-terminal-exec", "--app-id=org.omarchy.terminal",
-      "--title=System changes", "-e", "sh", "-c", '"$0" diff --color "$1" | less -R', binary, key])
+    Quickshell.execDetached(["setsid", "uwsm-app", "--", "xdg-terminal-exec", "--app-id=org.omarchy.terminal", "--title=System changes", "-e", "sh", "-c",
+                             '"$0" diff --color "$1" | less -R', binary, key])
   }
 
   function message(text) {
     var msg = String(text || "").trim().replace(/^syschange: /, "")
-    if (msg === "") msg = "syschange failed"
+    if (msg === "")
+      msg = "syschange failed"
     return msg.length > 400 ? msg.slice(0, 397) + "..." : msg
   }
-  function failure(text) { actionError = message(text) }
-  function dismissError() { actionError = ""; describeError = "" }
+  function failure(text) {
+    actionError = message(text)
+  }
+  function dismissError() {
+    actionError = ""
+    describeError = ""
+  }
 
   Component.onCompleted: refresh()
 
   IpcHandler {
     target: "dan4a.syschange"
-    function refresh(): void { root.refresh() }
+    function refresh(): void {
+      root.refresh()
+    }
   }
 
   // While an install runs in the terminal, look for the binary more often.
@@ -211,10 +272,12 @@ Item {
     interval: 3000
     repeat: true
     property int ticks: 0
-    onRunningChanged: if (running) ticks = 0
+    onRunningChanged: if (running)
+                        ticks = 0
     onTriggered: {
       root.refresh()
-      if (++ticks > 100 || (!root.missing && !root.outdated && root.initialized)) stop()
+      if (++ticks > 100 || (!root.missing && !root.outdated && root.initialized))
+        stop()
     }
   }
 
@@ -227,13 +290,29 @@ Item {
 
   Process {
     id: statusProcess
-    stdout: StdioCollector { id: statusOut; waitForEnd: true }
-    stderr: StdioCollector { id: statusErr; waitForEnd: true }
-    onExited: function(exitCode) {
+    stdout: StdioCollector {
+      id: statusOut
+      waitForEnd: true
+    }
+    stderr: StdioCollector {
+      id: statusErr
+      waitForEnd: true
+    }
+    onExited: function (exitCode) {
       root.missing = exitCode === 127
-      if (root.refreshAgain) { root.refreshAgain = false; Qt.callLater(root.refresh) }
-      if (root.missing) { root.statusError = ""; root.initialized = false; return }
-      if (exitCode !== 0) { root.statusError = root.message(statusErr.text || statusOut.text); return }
+      if (root.refreshAgain) {
+        root.refreshAgain = false
+        Qt.callLater(root.refresh)
+      }
+      if (root.missing) {
+        root.statusError = ""
+        root.initialized = false
+        return
+      }
+      if (exitCode !== 0) {
+        root.statusError = root.message(statusErr.text || statusOut.text)
+        return
+      }
       try {
         var changed = statusOut.text !== root.lastStatus
         root.lastStatus = statusOut.text
@@ -242,7 +321,8 @@ Item {
         root.pending = s.pending || []
         root.history = s.history || []
         root.count = s.count || 0
-        if (root.count === 0) root.describeError = ""
+        if (root.count === 0)
+          root.describeError = ""
         root.agents = s.agents || []
         root.checkpoints = s.checkpoints || []
         root.autoExport = s.autoExport || ""
@@ -251,10 +331,13 @@ Item {
         root.pendingDays = s.oldestPending ? Math.floor((Date.now() - Date.parse(s.oldestPending)) / 86400000) : 0
         // The shown diff follows the files: reload it when anything changed.
         if (changed && root.diffKey !== "") {
-          var still = root.pending.some(function(g) { return g.key === root.diffKey })
+          var still = root.pending.some(function (g) {
+            return g.key === root.diffKey
+          })
           root.showDiff(still ? root.diffKey : "")
         }
-        if (changed && root.query !== "") root.search(root.query)
+        if (changed && root.query !== "")
+          root.search(root.query)
         root.statusError = ""
       } catch (e) {
         root.statusError = "unexpected output from syschange status"
@@ -265,9 +348,15 @@ Item {
   Process {
     id: exportProcess
     property string path: ""
-    stderr: StdioCollector { id: exportErr; waitForEnd: true }
-    onExited: function(exitCode) {
-      if (exitCode !== 0) { root.failure(exportErr.text); return }
+    stderr: StdioCollector {
+      id: exportErr
+      waitForEnd: true
+    }
+    onExited: function (exitCode) {
+      if (exitCode !== 0) {
+        root.failure(exportErr.text)
+        return
+      }
       root.notice = "Exported to " + path
       Qt.openUrlExternally("file://" + path)
     }
@@ -281,55 +370,93 @@ Item {
     repeat: true
     onTriggered: {
       interval = 3600 * 1000
-      if (root.missing || !root.initialized || notifyProcess.running) return
+      if (root.missing || !root.initialized || notifyProcess.running)
+        return
       // The CLI shows them over D-Bus: their text never appears in a command line.
-      notifyProcess.command = [root.binary, "notify", "--send", "--remind-days", String(root.remindDays)].concat(root.weeklyDigest ? [] : ["--no-digest"])
+      notifyProcess.command = [root.binary, "notify", "--send", "--remind-days", String(root.remindDays)].concat(root.weeklyDigest ? [] :
+                                                                                                                                     ["--no-digest"])
       notifyProcess.running = true
     }
   }
 
-  Process { id: notifyProcess }
+  Process {
+    id: notifyProcess
+  }
 
   Process {
     id: searchProcess
-    stdout: StdioCollector { id: searchOut; waitForEnd: true }
-    onExited: function(exitCode) {
-      try { root.found = exitCode === 0 ? JSON.parse(searchOut.text) : [] } catch (e) { root.found = [] }
+    stdout: StdioCollector {
+      id: searchOut
+      waitForEnd: true
+    }
+    onExited: function (exitCode) {
+      try {
+        root.found = exitCode === 0 ? JSON.parse(searchOut.text) : []
+      } catch (e) {
+        root.found = []
+      }
     }
   }
 
   Process {
     id: diffProcess
-    stdout: StdioCollector { id: diffOut; waitForEnd: true }
-    onExited: function(exitCode) {
-      root.diffLines = exitCode === 0 ? root.parseDiff(diffOut.text) : [{ kind: "del", text: "Could not load the diff; press v to see it in a terminal" }]
+    stdout: StdioCollector {
+      id: diffOut
+      waitForEnd: true
+    }
+    onExited: function (exitCode) {
+      root.diffLines = exitCode === 0 ? root.parseDiff(diffOut.text) : [
+                                          {
+                                            kind: "del",
+                                            text: "Could not load the diff; press v to see it in a terminal"
+                                          }
+                                        ]
     }
   }
 
   Process {
     id: suggestProcess
-    stdout: StdioCollector { id: suggestOut; waitForEnd: true }
-    stderr: StdioCollector { id: suggestErr; waitForEnd: true }
-    onExited: function(exitCode) {
+    stdout: StdioCollector {
+      id: suggestOut
+      waitForEnd: true
+    }
+    stderr: StdioCollector {
+      id: suggestErr
+      waitForEnd: true
+    }
+    onExited: function (exitCode) {
       var key = root.suggestingKey
       root.suggestingKey = ""
-      if (key === "@all") root.refresh()
-      if (exitCode !== 0) { root.describeError = root.message(suggestErr.text || suggestOut.text); return }
-      if (key === "@all") return
+      if (key === "@all")
+        root.refresh()
+      if (exitCode !== 0) {
+        root.describeError = root.message(suggestErr.text || suggestOut.text)
+        return
+      }
+      if (key === "@all")
+        return
       root.suggested(key, String(suggestOut.text || "").trim())
     }
   }
 
   Process {
     id: actionProcess
-    stdout: StdioCollector { id: actionOut; waitForEnd: true }
-    stderr: StdioCollector { id: actionErr; waitForEnd: true }
-    onExited: function(exitCode) {
+    stdout: StdioCollector {
+      id: actionOut
+      waitForEnd: true
+    }
+    stderr: StdioCollector {
+      id: actionErr
+      waitForEnd: true
+    }
+    onExited: function (exitCode) {
       // Reverting a package prints the command to run as root: show it.
-      if (exitCode !== 0) root.failure(actionErr.text || actionOut.text)
+      if (exitCode !== 0)
+        root.failure(actionErr.text || actionOut.text)
       else {
         var out = String(actionOut.text || "").trim()
-        if (/sudo |systemctl /.test(out)) root.notice = out
+        if (/sudo |systemctl /.test(out))
+          root.notice = out
       }
       root.refresh()
       root.runNext()
